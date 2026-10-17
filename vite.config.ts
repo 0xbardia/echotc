@@ -171,6 +171,7 @@ export default defineConfig(({ command, isPreview }) => ({
     host: "127.0.0.1",
     port: 8081,
     strictPort: true,
+    allowedHosts: ["echotc.bydx.fun", "localhost", "127.0.0.1"],
   },
   resolve: { tsconfigPaths: true },
   plugins: [
