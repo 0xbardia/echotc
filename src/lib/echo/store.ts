@@ -80,7 +80,7 @@ const storage = {
     }
   },
   setItem: (name: string, value: Parameters<typeof baseStorage.setItem>[1]) => {
-    if (!allowWrite) return;
+    if (!allowWrite && !useEcho?.persist?.hasHydrated()) return;
     try {
       return baseStorage.setItem(name, value);
     } catch {

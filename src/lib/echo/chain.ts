@@ -1,7 +1,7 @@
 const DEPLOYED_STUDIONET_ADDRESS = "0xCABcFaBC7a76d602b8c4b0Aed367853155aDe59B";
 
 export const CONTRACT_ADDRESS = (
-  (import.meta.env.VITE_ECHO_CONTRACT_ADDRESS as string | undefined) || DEPLOYED_STUDIONET_ADDRESS
+  (import.meta.env?.VITE_ECHO_CONTRACT_ADDRESS as string | undefined) || DEPLOYED_STUDIONET_ADDRESS
 ).trim();
 
 export const DEPLOYMENT_TX =
