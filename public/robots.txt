@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# Case pages are per-record views. They stay reachable to people and are marked noindex in HTML.
+Sitemap: /sitemap.xml

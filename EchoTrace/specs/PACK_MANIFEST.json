@@ -1,0 +1,38 @@
+{
+  "README.md": {
+    "bytes": 1558,
+    "sha256": "0832a8d334e136d3c0cd8169c5a68f33c804a28c7a74cc58829ca5ebcfa47b54"
+  },
+  "START_PROMPT.md": {
+    "bytes": 4207,
+    "sha256": "cc24ee35bfee67575f2cf1ebf8e48a76f4dffcaf96eb24cd4845bbaaf6ddc75b"
+  },
+  "AGENTS.template.md": {
+    "bytes": 1199,
+    "sha256": "802b7bb854125e24502043f8c1c9ab317eb523b3df444406b965e85c22a0b6f8"
+  },
+  "specs/product.md": {
+    "bytes": 4470,
+    "sha256": "18f6efd75092273e09c3f996408dbd64a15dcc6800b4c5add05cb4b8f97ef8f9"
+  },
+  "specs/contract-security.md": {
+    "bytes": 7456,
+    "sha256": "0999c216e53e2296bdd7d0166116677f1aefa48647e738785bf0736478708ae5"
+  },
+  "specs/backend.md": {
+    "bytes": 5862,
+    "sha256": "17bc6ae51d4ce8278a65f477403379777ccd372e1bd36c008a08744eb5f25cc4"
+  },
+  "specs/frontend.md": {
+    "bytes": 3859,
+    "sha256": "38e4372f4f50376cf01009e1c740040bc32e4d686cf2602c2c61d82182ac5f61"
+  },
+  "specs/verification.md": {
+    "bytes": 9550,
+    "sha256": "ccc39489fdef73fc4bc6984d469ab50c6b503bee4a0e4c38f2819cc3e0fc437a"
+  },
+  "RESUME_PROMPT.md": {
+    "bytes": 1203,
+    "sha256": "863b54525ee7b2d6f4cd037b16d71d968111824eac2743c411016ab6c62cea07"
+  }
+}
