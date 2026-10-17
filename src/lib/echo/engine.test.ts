@@ -241,3 +241,58 @@ describe("EchoTc ledger storage migration", () => {
     assert.equal(mockStore.has("echotrace-ledger-v1"), true);
   });
 });
+
+describe("EchoTc chain configuration resilience", () => {
+  it("imports chain.ts safely when import.meta.env is undefined", async () => {
+    // In Node.js runtime, import.meta.env is undefined
+    const chainMod = await import("./chain.ts");
+    assert.equal(typeof chainMod.CONTRACT_ADDRESS, "string");
+    assert.equal(chainMod.CONTRACT_ADDRESS, "0xCABcFaBC7a76d602b8c4b0Aed367853155aDe59B");
+    assert.equal(chainMod.DEPLOYMENT_TX, "0x8c6aa8e55b97139bbda7ac8524b0f28a5b1a2788e871d2f3aee1c183e99b4a30");
+    assert.equal(chainMod.chainConfigured(), true);
+  });
+});
+
+describe("EchoTc store persistence lifecycle", () => {
+  it("writes new cases to storage when hydration has already completed", async () => {
+    const { useEcho, LEDGER_STORAGE_KEY } = await import("./store.ts");
+
+    // Rehydrate to complete store hydration lifecycle
+    await useEcho.persist.rehydrate();
+    assert.equal(useEcho.persist.hasHydrated(), true);
+
+    const draft = {
+      id: "draft-regression-1",
+      claim: "Northwind and Harborline joint sensor pilot announced",
+      urls: [
+        "https://fixtures.echotrace.local/harborline-wire",
+        "https://fixtures.echotrace.local/northwind-blog",
+        "https://fixtures.echotrace.local/civic-desk",
+      ],
+      discoveries: [],
+      clientRequestId: "req-regression-timing-001",
+      parentCaseId: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+
+    const created = useEcho.getState().createFromDraft(draft, NOW);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+
+    // Allow Zustand persist async write to settle
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Verify stored state in underlying storage
+    const storage = useEcho.persist.getOptions().storage;
+    const stored = (await storage?.getItem(LEDGER_STORAGE_KEY)) as {
+      state?: { ledger?: { cases?: Record<string, { id: string; manifest: { claim: string } }> } };
+    } | null;
+
+    assert.ok(stored, "State must be persisted to storage");
+    const storedCase = stored?.state?.ledger?.cases?.[created.caseId];
+    assert.ok(storedCase, `Case ${created.caseId} must exist in storage`);
+    assert.equal(storedCase.id, created.caseId);
+    assert.equal(storedCase.manifest.claim, draft.claim);
+  });
+});

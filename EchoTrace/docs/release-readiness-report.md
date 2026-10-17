@@ -112,15 +112,24 @@ npm run test:browser -- --live-reads  # Opt-in live Studionet read-only methods 
 
 ---
 
-## 5. Deployment Discrepancy
+## 5. Deployment & Release Reconciliation
 
-- **Deployed Contract Address:** `0xCABcFaBC7a76d602b8c4b0Aed367853155aDe59B`
+- **Live Deployed Contract Address:** `0xCABcFaBC7a76d602b8c4b0Aed367853155aDe59B`
 - **Deployment Transaction:** `0x8c6aa8e55b97139bbda7ac8524b0f28a5b1a2788e871d2f3aee1c183e99b4a30`
 - **Deployed Artifact SHA-256:** `8fcf378fe76e90c852307d97b4caa497be1c942a26049fb65b5350b2c2338e44`
 - **Local Source SHA-256:** `f450f96ffae4508eb78fc2800468bd2c6f8b5caeb3fb9f72152f6af575f920b1` (`EchoTrace/contracts/echotrace.py`)
 - **Observed Behavior Difference:**
   Calling `get_relationships` with a non-existent case ID on the deployed contract returns `[]`. The checked-in Python source returns `{"found": false, "relationships": []}`.
 - **Handling:** Frontend parser in `src/lib/echo/engine.ts` supports both responses. Per policy, redeployment is avoided to prevent unapproved transaction writes.
+- **Studio Simulator Sandbox Note:**
+  Local deployment activity inside the GenLayer Studio browser sandbox (`https://studio.genlayer.com/run-debug`) operates in a local simulator session (`0x610808f0...`) and is **not live Studionet deployment evidence**. The active application and frontend target exclusively `0xCABcFaBC7a76d602b8c4b0Aed367853155aDe59B`.
+- **Git & Release v1.0.0 State:**
+  Release tag `v1.0.0` points to commit `cb8abef0a36d55a557ed5e938475ffa3d725f84a`. The subsequent resilience fixes (`chain.ts` optional chaining, `store.ts` persist guard, and regression tests) exist on `main` branch only and are not included in the immutable `v1.0.0` release tag.
+- **Unexecuted Scenarios Preserved as NOT RUN:**
+  - Interactive wallet wrong-chain switch prompt: NOT RUN.
+  - User signature rejection prompt: NOT RUN.
+  - Runtime RPC timeout and rate-limit fault injection: NOT RUN.
+  - Live on-chain write transactions: NOT RUN.
 
 ---
 
