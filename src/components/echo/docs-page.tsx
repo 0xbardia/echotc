@@ -1,5 +1,7 @@
 import { POLICY_VERSION } from "@/lib/echo/types";
 
+import { CONTRACT_ADDRESS, DEPLOYMENT_TX } from "@/lib/echo/chain";
+
 export function DocsPage() {
   return (
     <div className="wrap">
@@ -63,7 +65,7 @@ export function DocsPage() {
       </section>
       <section className="section">
         <h2>Deploying the contract</h2>
-        <p>The contract source is EchoTrace/contracts/echotrace.py. Address 0xCABcFaBC7a76d602b8c4b0Aed367853155aDe59B. Deployment transaction 0x8c6aa8e55b97139bbda7ac8524b0f28a5b1a2788e871d2f3aee1c183e99b4a30. Consensus accepted it and execution succeeded. A missing case, a missing source, and an unsealed report return JSON with found or finalized set to false. They do not revert. The previous address 0x8EB48E25fAE1F8b997b58e27F756FD0A7E1FB5Ce still holds the earlier cases, including et-41f3646a7e1f and et-280db9fe766f. An earlier deployment at 0xCBe65e90A55c3a873f1DA815970396bb25699a48 could not finish source review. Studio’s validator set is the hosted studio configuration, not a claim of independent mainnet operators.</p>
+        <p>The contract source is EchoTrace/contracts/echotrace.py. Current address {CONTRACT_ADDRESS || "not configured (set VITE_ECHO_CONTRACT_ADDRESS)"}. Deployment transaction {DEPLOYMENT_TX}. Consensus accepted it and execution succeeded. A missing case, a missing source, and an unsealed report return JSON with found or finalized set to false. They do not revert. Prior deployments at 0xCABcFaBC7a76d602b8c4b0Aed367853155aDe59B and 0x8EB48E25fAE1F8b997b58e27F756FD0A7E1FB5Ce hold the earlier cases. Studio’s validator set is the hosted studio configuration, not a claim of independent mainnet operators.</p>
       </section>
     </div>
   );

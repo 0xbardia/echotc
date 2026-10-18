@@ -1,8 +1,8 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { createClientOnlyFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
 import { chainConfigured, CONTRACT_ADDRESS, DEPLOYMENT_TX } from "@/lib/echo/chain";
-import { chainExecutionSucceeded, nextChainCall, type ChainSnapshot } from "@/lib/echo/chain-plan";
+import { chainExecutionSucceeded, isChainCaseId, nextChainCall, type ChainSnapshot } from "@/lib/echo/chain-plan";
 import { callView, plan, removalImpact, retryable, type ViewName } from "@/lib/echo/engine";
 import { useEcho } from "@/lib/echo/store";
 import type { CaseFile, Relationship } from "@/lib/echo/types";
@@ -25,31 +25,35 @@ const challengeOnChain = createClientOnlyFn(async (txId: `0x${string}`, account:
   return mod.challengeChain(txId, account);
 });
 
+const readRelationshipsOnChain = createClientOnlyFn(async (id: string) => {
+  const mod = await import("@/lib/echo/chain.client");
+  return mod.readRelationships(id);
+});
+
 const readSnapshot = createClientOnlyFn(async (caseId: string, sourceIds: string[]) => {
   const mod = await import("@/lib/echo/chain.client");
   const caseRead = await mod.readChain("get_case", [caseId]);
   if (!caseRead.ok) throw new Error(caseRead.error);
   const parsed = typeof caseRead.value === "string" ? JSON.parse(caseRead.value) : caseRead.value;
   if (parsed && parsed.found === false) throw new Error("Studionet has no case with that id.");
-  const reviews = [];
-  for (const sourceId of sourceIds) {
-    const review = await mod.readChain("get_source_review", [caseId, sourceId]);
-    if (!review.ok) throw new Error(review.error);
-    reviews.push(typeof review.value === "string" ? JSON.parse(review.value) : review.value);
-  }
-  const rel = await mod.readChain("get_relationships", [caseId]);
-  if (!rel.ok) throw new Error(rel.error);
-  const rawRelationships = typeof rel.value === "string" ? JSON.parse(rel.value) : rel.value;
-  const relationships = Array.isArray(rawRelationships)
-    ? rawRelationships
-    : Array.isArray(rawRelationships?.relationships)
-      ? rawRelationships.relationships
-      : [];
+
+  const [relResult, ...reviews] = await Promise.all([
+    mod.readRelationships(caseId),
+    ...sourceIds.map((sourceId) => mod.readChain("get_source_review", [caseId, sourceId])),
+  ]);
+
+  const relationships = relResult.relationships;
+
+  const parsedReviews = reviews.map((r) => {
+    if (!r.ok) throw new Error(r.error);
+    return typeof r.value === "string" ? JSON.parse(r.value) : r.value;
+  });
+
   return {
     caseId,
     status: String(parsed.status),
     owner: String(parsed.owner),
-    reviews,
+    reviews: parsedReviews,
     relationships,
   } satisfies ChainSnapshot;
 });
@@ -73,7 +77,7 @@ function statusLabel(file: CaseFile) {
 
 export function CaseDesk({ id }: { id: string }) {
   const ready = useLedgerReady();
-  const file = useEcho((state) => state.ledger.cases[id]);
+  const localFile = useEcho((state) => state.ledger.cases[id]);
   const ledger = useEcho((state) => state.ledger);
   const principal = useEcho((state) => state.principal);
   const approveNext = useEcho((state) => state.approveNext);
@@ -93,33 +97,129 @@ export function CaseDesk({ id }: { id: string }) {
   const [chainBusy, setChainBusy] = useState(false);
   const [error, setError] = useState("");
   const [mirror, setMirror] = useState<{ snapshot: ChainSnapshot | null; report: string | null; reportError: string | null } | null>(null);
+  const navigate = useNavigate();
+  const [remoteLoading, setRemoteLoading] = useState(false);
+  const [remoteCase, setRemoteCase] = useState<CaseFile | null>(null);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
+  const [remoteNotFound, setRemoteNotFound] = useState(false);
+  const [mirrorLoading, setMirrorLoading] = useState(false);
 
-  const step = file ? plan(file) : null;
-  const impact = file ? removalImpact(file, hidden) : null;
-  const owned = file?.owner === principal;
-  const chainCaseId = file?.chain?.caseId ?? "";
+  useEffect(() => {
+    if (localFile || !ready) return;
+    let cancel = false;
+    setRemoteLoading(true);
+    setRemoteError(null);
+    setRemoteNotFound(false);
+    void (async () => {
+      try {
+        const caseRead = await readOnChain("get_case", [id]);
+        if (cancel) return;
+        if (!caseRead.ok) {
+          setRemoteError(caseRead.error);
+          return;
+        }
+        const parsed = typeof caseRead.value === "string" ? JSON.parse(caseRead.value) : caseRead.value;
+        if (!parsed || parsed.found === false) {
+          setRemoteNotFound(true);
+          return;
+        }
+        const [rep, relResult] = await Promise.all([
+          readOnChain("get_report", [id]),
+          readRelationshipsOnChain(id),
+        ]);
+        if (cancel) return;
+        const reportParsed = rep?.ok ? (typeof rep.value === "string" ? JSON.parse(rep.value) : rep.value) : null;
+        const rawRelationships = relResult?.relationships || [];
+
+        const sources = (parsed.manifest?.sources || []).map((s: { id: string; url: string; role?: string; parentSourceId?: string | null }) => {
+          let host = s.id;
+          try {
+            if (s.url) host = new URL(s.url).hostname;
+          } catch {
+            host = s.id;
+          }
+          return {
+            ...s,
+            title: host,
+            role: (s.role === "discovered" ? "discovered" : "submitted") as "discovered" | "submitted",
+            parentSourceId: s.parentSourceId || null,
+          };
+        });
+
+        const constructed: CaseFile = {
+          id: parsed.id,
+          owner: parsed.owner,
+          status: parsed.status,
+          manifest: {
+            claim: parsed.manifest?.claim || "",
+            language: parsed.manifest?.language || "en",
+            sources,
+            policyVersion: parsed.manifest?.policyVersion || "echotrace-policy-1.0.0",
+            clientRequestId: parsed.manifest?.clientRequestId || "",
+            parentCaseId: parsed.manifest?.parentCaseId || null,
+            manifestCanonical: "",
+          },
+          reviews: sources.map((s: { id: string }) => ({
+            sourceId: s.id,
+            fetchStatus: "reviewed",
+            stance: "mentions_only",
+            contributions: [],
+            attempts: 1,
+            coverageNote: "Studionet verified",
+            limitations: "",
+          })),
+          relationships: rawRelationships,
+          report: reportParsed?.finalized ? reportParsed : null,
+          receipts: [],
+          appliedBatches: [],
+          chain: {
+            caseId: parsed.id,
+            owner: parsed.owner,
+            txs: [],
+          },
+          createdAt: parsed.createdAt || "on-chain",
+          updatedAt: parsed.updatedAt || "on-chain",
+        };
+        if (!cancel) setRemoteCase(constructed);
+      } catch (err) {
+        if (!cancel) setRemoteError(err instanceof Error ? err.message : "Failed to load on-chain case");
+      } finally {
+        if (!cancel) setRemoteLoading(false);
+      }
+    })();
+    return () => { cancel = true; };
+  }, [localFile, id, ready]);
+
+  const activeFile = localFile || remoteCase;
+  const step = activeFile ? plan(activeFile) : null;
+  const impact = activeFile ? removalImpact(activeFile, hidden) : null;
+  const owned = activeFile?.owner === principal;
+  const chainCaseId = activeFile?.chain?.caseId ?? (isChainCaseId(id) ? id : "");
   const chainFinal = Boolean(
-    file?.chain?.txs.some((tx) => tx.method === "finalize_case" && chainExecutionSucceeded(tx.execution)) ||
-      mirror?.snapshot?.status === "FINALIZED",
+    activeFile?.chain?.txs.some((tx: { method: string; execution: string }) => tx.method === "finalize_case" && chainExecutionSucceeded(tx.execution)) ||
+      mirror?.snapshot?.status === "FINALIZED" || activeFile?.status === "FINALIZED",
   );
   const upcoming =
-    !file || chainFinal
+    !activeFile || chainFinal
       ? null
       : !chainCaseId
-        ? nextChainCall(file, null, "preview")
+        ? nextChainCall(activeFile, null, "preview")
         : mirror?.snapshot
-          ? nextChainCall(file, mirror.snapshot, "preview")
+          ? nextChainCall(activeFile, mirror.snapshot, "preview")
           : null;
   const readyToSign = !chainCaseId || Boolean(mirror?.snapshot) || Boolean(mirror?.reportError);
 
   useEffect(() => {
-    if (!chainCaseId || !file) return;
+    if (!chainCaseId || !activeFile) return;
     let cancel = false;
-    const sourceIds = file.manifest.sources.map((source) => source.id);
+    setMirrorLoading(true);
+    const sourceIds = activeFile.manifest.sources.map((source: { id: string }) => source.id);
     void (async () => {
       try {
-        const snapshot = await readSnapshot(chainCaseId, sourceIds);
-        const report = await readOnChain("get_report", [chainCaseId]);
+        const [snapshot, report] = await Promise.all([
+          readSnapshot(chainCaseId, sourceIds),
+          readOnChain("get_report", [chainCaseId]),
+        ]);
         if (cancel) return;
         setMirror({
           snapshot,
@@ -130,22 +230,46 @@ export function CaseDesk({ id }: { id: string }) {
         if (!cancel) {
           setMirror({ snapshot: null, report: null, reportError: reason instanceof Error ? reason.message : "Studionet read failed." });
         }
+      } finally {
+        if (!cancel) setMirrorLoading(false);
       }
     })();
     return () => {
       cancel = true;
     };
-  }, [chainCaseId, file]);
+  }, [chainCaseId, activeFile]);
 
-  const families = file?.report?.families ?? [];
+  const families = activeFile?.report?.families ?? [];
   const sourceTitle = useMemo(() => {
     const map = new Map<string, string>();
-    file?.manifest.sources.forEach((source) => map.set(source.id, source.title));
+    activeFile?.manifest.sources.forEach((source: { id: string; title: string }) => map.set(source.id, source.title));
     return map;
-  }, [file]);
+  }, [activeFile]);
 
-  if (!ready) return <div className="wrap"><div className="skeleton" role="status" aria-label="Opening the local ledger" /></div>;
-  if (!file) {
+  if (!ready || remoteLoading) return <div className="wrap"><div className="skeleton" role="status" aria-label="Opening ledger or reading contract…" /></div>;
+  if (remoteError && !remoteError.includes("No contract address is configured")) {
+    return (
+      <div className="wrap">
+        <h1>Studionet read error</h1>
+        <p className="error" role="alert">{remoteError}</p>
+        <p className="muted">Direct Mode keeps local cases. For on-chain cases, verify network connection to Studionet.</p>
+        <div className="row">
+          <button className="btn btn-primary" type="button" onClick={() => window.location.reload()}>Retry</button>
+          <Link className="btn" to="/app">Back to the desk</Link>
+        </div>
+      </div>
+    );
+  }
+  if (remoteNotFound) {
+    return (
+      <div className="wrap">
+        <h1>Case not on this device</h1>
+        <p>No case with id {id} exists in this browser or at contract {CONTRACT_ADDRESS}.</p>
+        <Link className="btn" to="/app">Back to the desk</Link>
+      </div>
+    );
+  }
+  if (!activeFile) {
     return (
       <div className="wrap">
         <h1>Case not on this device</h1>
@@ -154,6 +278,8 @@ export function CaseDesk({ id }: { id: string }) {
       </div>
     );
   }
+
+  const file = activeFile;
 
   function onApprove() {
     const result = approveNext(file.id, new Date().toISOString());
@@ -208,6 +334,9 @@ export function CaseDesk({ id }: { id: string }) {
         chainCaseId,
         owner,
       );
+      if (submitted.ok && chainCaseId && file.id !== chainCaseId) {
+        void navigate({ to: "/cases/$id", params: { id: chainCaseId } });
+      }
       setChainNote(
         submitted.ok
           ? `${call.method} ${submitted.hash} finalized ${submitted.statusName} / ${submitted.execution}. Chain case ${chainCaseId || "not returned"}.`
@@ -350,15 +479,26 @@ export function CaseDesk({ id }: { id: string }) {
             ? `Chain case ${file.chain.caseId}. Owner ${mirror?.snapshot?.owner || file.chain.owner || "unread"}. Status ${mirror?.snapshot?.status || "loading"}.`
             : "No Studionet case yet. The first signature creates one from this manifest."}
         </p>
+        {remoteCase && !owned ? (
+          <div className="banner banner-warn" role="status">
+            <p>Read-only: This case is owned on Studionet by {remoteCase.owner}. You can inspect evidence and view contract reports, but only the owner can submit subsequent transactions.</p>
+          </div>
+        ) : null}
         <div className="row">
           <button
             className="btn btn-primary"
             type="button"
             data-testid="submit-wallet"
-            disabled={chainBusy || chainFinal || !chainConfigured() || !principal.startsWith("0x") || !readyToSign}
+            disabled={chainBusy || mirrorLoading || chainFinal || !chainConfigured() || !principal.startsWith("0x") || !readyToSign || !upcoming}
             onClick={() => void onChain()}
           >
-            {chainBusy ? "Waiting for consensus…" : chainFinal ? "Finalized on Studionet" : "Sign this step"}
+            {mirrorLoading
+              ? "Refreshing chain state…"
+              : chainBusy
+                ? "Waiting for consensus…"
+                : chainFinal
+                  ? "Finalized on Studionet"
+                  : "Sign this step"}
           </button>
         </div>
         {!principal.startsWith("0x") ? <p className="muted">Connect a Studionet account first. Nothing is sent from the preview principal.</p> : null}

@@ -1,4 +1,8 @@
-import { CONTRACT_ADDRESS, chainConfigured } from "./chain.ts";
+import { getConfiguredContractAddress } from "./chain.ts";
+import {
+  decodeCanonicalRelationships,
+  type CanonicalGetRelationshipsResult,
+} from "./relationship-canonical.ts";
 
 function revertText(data: unknown): string | null {
   const result = (data as { receipt?: { result?: string } } | undefined)?.receipt?.result;
@@ -12,8 +16,9 @@ function revertText(data: unknown): string | null {
   }
 }
 
-export async function readChain(functionName: string, args: string[]) {
-  if (!chainConfigured()) {
+export async function readChain(functionName: string, args: string[], overrideAddress?: string) {
+  const targetAddress = getConfiguredContractAddress(overrideAddress);
+  if (!targetAddress) {
     return { ok: false as const, error: "No contract address is configured. This read was not sent." };
   }
   const { createClient } = await import("genlayer-js");
@@ -21,7 +26,7 @@ export async function readChain(functionName: string, args: string[]) {
   const client = createClient({ chain: studionet });
   try {
     const value = await client.readContract({
-      address: CONTRACT_ADDRESS as `0x${string}`,
+      address: targetAddress,
       functionName,
       args,
     });
@@ -30,7 +35,7 @@ export async function readChain(functionName: string, args: string[]) {
       value,
       readAt: new Date().toISOString(),
       source: "studionet" as const,
-      address: CONTRACT_ADDRESS,
+      address: targetAddress,
     };
   } catch (error) {
     const err = error as {
@@ -48,13 +53,36 @@ export async function readChain(functionName: string, args: string[]) {
       executionResult: "ERROR" as const,
       readAt: new Date().toISOString(),
       source: "studionet" as const,
-      address: CONTRACT_ADDRESS,
+      address: targetAddress,
     };
   }
 }
 
-export async function writeChain(functionName: string, args: string[], account: `0x${string}`) {
-  if (!chainConfigured()) throw new Error("Contract address is not configured.");
+/**
+ * Reads canonical relationships for a case from GenLayer Studionet.
+ * Decodes and strictly validates the canonical return shape against the authoritative contract source.
+ * Fails closed without SDK dispatch when unconfigured.
+ * Rejects legacy bare array payloads with IncompatibleRelationshipPayloadError.
+ */
+export async function readRelationships(
+  caseId: string,
+  overrideAddress?: string,
+): Promise<CanonicalGetRelationshipsResult> {
+  const result = await readChain("get_relationships", [caseId], overrideAddress);
+  if (!result.ok) {
+    throw new Error(result.error);
+  }
+  return decodeCanonicalRelationships(result.value);
+}
+
+export async function writeChain(
+  functionName: string,
+  args: string[],
+  account: `0x${string}`,
+  overrideAddress?: string,
+) {
+  const targetAddress = getConfiguredContractAddress(overrideAddress);
+  if (!targetAddress) throw new Error("Contract address is not configured.");
   const { connectedProvider } = await import("@/components/echo/wallet-inner");
   const provider = await connectedProvider();
   const { createClient } = await import("genlayer-js");
@@ -65,7 +93,7 @@ export async function writeChain(functionName: string, args: string[], account: 
     provider: provider as never,
   });
   const hash = await client.writeContract({
-    address: CONTRACT_ADDRESS as `0x${string}`,
+    address: targetAddress,
     functionName,
     args,
     value: 0n,
@@ -97,7 +125,7 @@ export function returnedCaseId(tx: Record<string, unknown>): string | null {
   const consensus = tx.consensus_data as { leader_receipt?: { result?: unknown }[] } | undefined;
   const result = consensus?.leader_receipt?.[0]?.result;
   if (typeof result === "string" && /^et-[a-f0-9]{12}$/.test(result)) return result;
-  const text = JSON.stringify(result ?? "");
+  const text = JSON.stringify(result ?? "") + " " + JSON.stringify(tx ?? "");
   const match = text.match(/et-[a-f0-9]{12}/);
   return match ? match[0] : null;
 }

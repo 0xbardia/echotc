@@ -243,13 +243,14 @@ describe("EchoTc ledger storage migration", () => {
 });
 
 describe("EchoTc chain configuration resilience", () => {
-  it("imports chain.ts safely when import.meta.env is undefined", async () => {
-    // In Node.js runtime, import.meta.env is undefined
+  it("imports chain.ts safely without baked fallback and validates explicit config", async () => {
     const chainMod = await import("./chain.ts");
     assert.equal(typeof chainMod.CONTRACT_ADDRESS, "string");
-    assert.equal(chainMod.CONTRACT_ADDRESS, "0xCABcFaBC7a76d602b8c4b0Aed367853155aDe59B");
     assert.equal(chainMod.DEPLOYMENT_TX, "0x8c6aa8e55b97139bbda7ac8524b0f28a5b1a2788e871d2f3aee1c183e99b4a30");
-    assert.equal(chainMod.chainConfigured(), true);
+    // Without environment variable, default is unconfigured (no baked fallback)
+    assert.equal(chainMod.isValidContractAddress("0xCABcFaBC7a76d602b8c4b0Aed367853155aDe59B"), true);
+    assert.equal(chainMod.isValidContractAddress("invalid-addr"), false);
+    assert.equal(chainMod.getConfiguredContractAddress("0xCABcFaBC7a76d602b8c4b0Aed367853155aDe59B"), "0xCABcFaBC7a76d602b8c4b0Aed367853155aDe59B");
   });
 });
 

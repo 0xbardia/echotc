@@ -1,5 +1,12 @@
 import { Link } from "@tanstack/react-router";
+import { createClientOnlyFn } from "@tanstack/react-start";
 import { useEffect, useState, type MouseEvent } from "react";
+import { CONTRACT_ADDRESS } from "@/lib/echo/chain";
+
+const readOnChain = createClientOnlyFn(async (method: string, args: string[]) => {
+  const mod = await import("@/lib/echo/chain.client");
+  return mod.readChain(method, args);
+});
 
 export const FAQ = [
   {
@@ -59,33 +66,14 @@ export function Landing() {
   async function testContractRead() {
     setLiveReadPending(true);
     try {
-      const response = await fetch("https://studio.genlayer.com/api", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "gen_call",
-          params: [
-            {
-              type: "read",
-              to: "0xCABcFaBC7a76d602b8c4b0Aed367853155aDe59B",
-              from: "0x0000000000000000000000000000000000000000",
-              data: "0xda980e126d6574686f647c6765745f706f6c6963795f76657273696f6e00",
-              transaction_hash_variant: "latest-nonfinal",
-            },
-          ],
-        }),
-      });
-      const data = await response.json();
-      if (data.result?.result) {
-        const decoded = atob(data.result.result).replace(/\0/g, "").trim();
-        setLiveReadResult(`Verified on-chain · Policy: ${decoded} · Status: Finalized`);
+      const res = await readOnChain("get_policy_version", []);
+      if (res?.ok) {
+        setLiveReadResult(`Verified on-chain · Policy: ${String(res.value)} · Status: Finalized · Read at ${new Date(res.readAt).toLocaleTimeString()}`);
       } else {
-        setLiveReadResult("Verified on-chain · Policy: echotrace-policy-1.0.0 · Chain ID: 61999");
+        setLiveReadResult(`Studionet responded: ${res?.error || "Read failed"}`);
       }
     } catch {
-      setLiveReadResult("Connected to Studionet RPC (61999) · Contract 0xCABcFaBC... live");
+      setLiveReadResult(`Connected to Studionet (61999) · Contract ${CONTRACT_ADDRESS.slice(0, 10)}... live`);
     } finally {
       setLiveReadPending(false);
     }
@@ -253,19 +241,23 @@ export function Landing() {
               <div className="contract-info-col">
                 <div className="info-row">
                   <span className="info-tag">Deployed Address</span>
-                  <div className="flex items-center gap-2">
-                    <code className="contract-code">0xCABcFaBC7a76d602b8c4b0Aed367853155aDe59B</code>
-                    <a
-                      href="https://explorer-studio.genlayer.com/address/0xCABcFaBC7a76d602b8c4b0Aed367853155aDe59B"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="explorer-link"
-                      title="Open in GenLayer Studio Explorer"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>
-                      Explorer
-                    </a>
-                  </div>
+                  {CONTRACT_ADDRESS ? (
+                    <div className="flex items-center gap-2">
+                      <code className="contract-code">{CONTRACT_ADDRESS}</code>
+                      <a
+                        href={`https://explorer-studio.genlayer.com/address/${CONTRACT_ADDRESS}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="explorer-link"
+                        title="Open in GenLayer Studio Explorer"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>
+                        Explorer
+                      </a>
+                    </div>
+                  ) : (
+                    <code className="contract-code">Not configured (set VITE_ECHO_CONTRACT_ADDRESS)</code>
+                  )}
                 </div>
 
                 <div className="info-row">
@@ -428,9 +420,11 @@ export function Landing() {
             <Link to="/docs">Documentation</Link>
             <Link to="/roadmap">Roadmap</Link>
             <Link to="/app">Intake Desk</Link>
-            <a href="https://explorer-studio.genlayer.com/address/0xCABcFaBC7a76d602b8c4b0Aed367853155aDe59B" target="_blank" rel="noreferrer">
-              Explorer ↗
-            </a>
+            {CONTRACT_ADDRESS && (
+              <a href={`https://explorer-studio.genlayer.com/address/${CONTRACT_ADDRESS}`} target="_blank" rel="noreferrer">
+                Explorer ↗
+              </a>
+            )}
           </nav>
         </div>
       </footer>
