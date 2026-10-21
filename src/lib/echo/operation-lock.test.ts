@@ -30,8 +30,40 @@ class MockLocalStorage {
   }
 }
 
+class MockLockManager {
+  private held = new Set<string>();
+
+  async request(name: string, optionsOrFn: unknown, fnOrNothing?: unknown) {
+    const isOptions = typeof optionsOrFn === "object" && optionsOrFn !== null;
+    const options = isOptions ? (optionsOrFn as { ifAvailable?: boolean }) : {};
+    const fn = (isOptions ? fnOrNothing : optionsOrFn) as (lock: unknown) => Promise<unknown>;
+
+    if (this.held.has(name)) {
+      if (options.ifAvailable) {
+        return fn(null);
+      }
+      throw new Error(`Operation locked by another tab (${name}).`);
+    }
+
+    this.held.add(name);
+    try {
+      return await fn({ name });
+    } finally {
+      this.held.delete(name);
+    }
+  }
+}
+
 const mockStorage = new MockLocalStorage();
 (globalThis as unknown as { localStorage: MockLocalStorage }).localStorage = mockStorage;
+
+if (!(navigator as { locks?: unknown }).locks) {
+  Object.defineProperty(navigator, "locks", {
+    value: new MockLockManager(),
+    configurable: true,
+    writable: true,
+  });
+}
 
 const CHAIN_ID = 61999;
 const CONTRACT_A = "0x0BcE79508f7705412D6c6E83750D12547715DB53";
