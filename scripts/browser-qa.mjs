@@ -89,6 +89,7 @@ try {
     record("Responsive", `Desk ${w}px overflow`, !deskOverflow ? "PASS" : "FAIL", `scrollWidth <= ${w}px`);
 
     if (w <= 1080) {
+      await page.locator("details.mobile-nav").waitFor({ timeout: 3000 }).catch(() => {});
       const mobileNav = await page.locator("details.mobile-nav").count();
       record("Responsive", `App details.mobile-nav at ${w}px`, mobileNav === 1 ? "PASS" : "FAIL", `details.mobile-nav count: ${mobileNav}`);
     } else {
@@ -251,7 +252,6 @@ try {
     localStorage.setItem("echotrace-ledger-v1", legacy);
   });
   await page.goto(`${baseUrl}/app`, { waitUntil: "networkidle" });
-  await page.waitForTimeout(500);
   const migratedDeskText = await page.locator("body").innerText();
   const legacyStillPresent = await page.evaluate(() => Boolean(localStorage.getItem("echotrace-ledger-v1")));
   record("Storage Migration", "Legacy case restored and preserved", migratedDeskText.includes("et-migrated-888") && legacyStillPresent ? "PASS" : "FAIL", "Legacy case rendered; legacy storage untouched");

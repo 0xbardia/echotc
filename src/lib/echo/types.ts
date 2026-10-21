@@ -11,14 +11,29 @@ export const MAX_ATTEMPTS = 2;
 
 export type SourceRole = "submitted" | "discovered";
 export type ItemStatus = "pending" | "reviewed" | "unavailable" | "rejected" | "failed";
-export type Stance = "supports" | "contradicts" | "mentions_only" | "unclear";
-export type EvidenceKind = "announcement" | "interview" | "wire" | "commentary" | "mention";
+export type Stance =
+  | "primary_reporting"
+  | "attributed_source"
+  | "mentions_only"
+  | "unrelated"
+  | "unclear"
+  | "supports"
+  | "contradicts";
+export type EvidenceKind = "announcement" | "interview" | "wire" | "commentary" | "mention" | "document";
 export type RelType =
+  | "primary_evidence"
   | "explicit_dependency"
   | "possible_dependency"
   | "distinct_evidence_shown"
   | "unresolved";
 export type CaseStatus = "CREATED" | "SOURCE_REVIEW" | "RELATIONSHIP_REVIEW" | "FINALIZED";
+export type LogicalWorkflowOp =
+  | "create_case"
+  | "review_sources"
+  | "retry_sources"
+  | "seal_sources"
+  | "review_relationships"
+  | "finalize_case";
 
 export interface SourceRef {
   id: string;
@@ -32,6 +47,7 @@ export interface Contribution {
   id: string;
   sourceId: string;
   quote: string;
+  quoteOffset?: number;
   evidenceKind: EvidenceKind;
   originUrl: string | null;
   originLabel: string;
@@ -73,8 +89,13 @@ export interface Report {
   partial: boolean;
   sourcesReviewed: number;
   sourcesUnavailable: number;
-  sourcesRejected: number;
+  sourcesRejected?: number;
   sourcesFailed: number;
+  primarySources?: number;
+  attributedSources?: number;
+  mentionsSources?: number;
+  unrelatedSources?: number;
+  unclearSources?: number;
   relationshipCoverage: string;
   families: Family[];
   unresolved: string[];
@@ -105,6 +126,7 @@ export interface ChainTx {
 export interface ChainLink {
   caseId: string | null;
   owner: string | null;
+  contractAddress?: string | null;
   txs: ChainTx[];
 }
 

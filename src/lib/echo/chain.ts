@@ -31,7 +31,9 @@ export const CONTRACT_ADDRESS: string =
     "").trim();
 
 export const DEPLOYMENT_TX =
-  "0x8c6aa8e55b97139bbda7ac8524b0f28a5b1a2788e871d2f3aee1c183e99b4a30";
+  ((typeof import.meta !== "undefined" && import.meta.env?.VITE_ECHO_DEPLOYMENT_TX) ||
+    (typeof process !== "undefined" && process.env?.VITE_ECHO_DEPLOYMENT_TX) ||
+    "0x8c6aa8e55b97139bbda7ac8524b0f28a5b1a2788e871d2f3aee1c183e99b4a30").trim();
 
 export function chainConfigured(overrideAddress?: string): boolean {
   return Boolean(getConfiguredContractAddress(overrideAddress));

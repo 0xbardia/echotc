@@ -34,7 +34,16 @@ async function sendTx(tx) {
   return txId;
 }
 
-const browser = await chromium.launch({ headless: true });
+const launchOptions = {
+  headless: true,
+  args: ["--no-sandbox", "--disable-setuid-sandbox"],
+};
+if (process.env.CHROME_BIN) {
+  launchOptions.executablePath = process.env.CHROME_BIN;
+} else if (fs.existsSync("/usr/bin/google-chrome")) {
+  launchOptions.executablePath = "/usr/bin/google-chrome";
+}
+const browser = await chromium.launch(launchOptions);
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 page.setDefaultTimeout(30_000);
 await page.exposeFunction("__echoSend", (tx) => sendTx(tx));
@@ -84,8 +93,10 @@ function note(line) {
   console.log(line);
 }
 
+const baseUrl = process.env.BASE_URL || "http://127.0.0.1:4185";
+
 try {
-  await page.goto("http://127.0.0.1:8080/app/new", { waitUntil: "networkidle" });
+  await page.goto(`${baseUrl}/app/new`, { waitUntil: "networkidle" });
   await page.evaluate(() => window.dispatchEvent(new Event("eip6963:requestProvider")));
   await page.waitForTimeout(800);
   const already = await page.locator("body").innerText();

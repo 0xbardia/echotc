@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { applyPlan, createCase, plan, retryUnavailable } from "./engine.ts";
-import { PREVIEW_PRINCIPAL, emptyLedger, type ChainTx, type Draft, type Ledger, type Receipt } from "./types.ts";
+import { PREVIEW_PRINCIPAL, emptyLedger, type CaseFile, type ChainTx, type Draft, type Ledger, type Receipt } from "./types.ts";
 
 interface EchoState {
   principal: string;
@@ -14,7 +14,37 @@ interface EchoState {
   approveNext: (caseId: string, now: string) => { ok: true } | { ok: false; error: string };
   denyNext: (caseId: string, method: string, now: string) => void;
   retry: (caseId: string, now: string) => { ok: true } | { ok: false; error: string };
-  recordChain: (caseId: string, tx: ChainTx, chainCaseId: string | null, owner: string | null) => void;
+  recordChain: (
+    caseId: string,
+    tx: ChainTx,
+    chainCaseId: string | null,
+    owner: string | null,
+    contractAddress?: string | null,
+    fallbackFile?: CaseFile | null,
+  ) => void;
+}
+
+export function getIsolatedCase(
+  ledger: Ledger,
+  id: string,
+  targetContractAddress?: string | null,
+): CaseFile | null {
+  if (id.includes(":")) {
+    return ledger.cases[id] ?? null;
+  }
+  if (targetContractAddress) {
+    const scopedKey = `${targetContractAddress.toLowerCase()}:${id}`;
+    if (ledger.cases[scopedKey]) return ledger.cases[scopedKey];
+  }
+  const candidate = ledger.cases[id];
+  if (!candidate) return null;
+
+  if (candidate.chain?.contractAddress && targetContractAddress) {
+    if (candidate.chain.contractAddress.toLowerCase() !== targetContractAddress.toLowerCase()) {
+      return null;
+    }
+  }
+  return candidate;
 }
 
 function receipt(partial: Omit<Receipt, "chainTxHash" | "consensus">): Receipt {
@@ -191,16 +221,40 @@ export const useEcho = create<EchoState>()(
         set({ ledger: result.ledger });
         return { ok: true };
       },
-      recordChain: (caseId, tx, chainCaseId, owner) => {
+      recordChain: (caseId, tx, chainCaseId, owner, contractAddress, fallbackFile) => {
         const ledger = structuredClone(get().ledger);
-        const file = ledger.cases[caseId];
+        let file = ledger.cases[caseId];
+        if (!file && fallbackFile) {
+          file = structuredClone(fallbackFile);
+          ledger.cases[caseId] = file;
+        }
         if (!file) return;
         const chain = file.chain ?? { caseId: null, owner: null, txs: [] };
-        if (chainCaseId) chain.caseId = chainCaseId;
+        if (chainCaseId) {
+          chain.caseId = chainCaseId;
+        }
         if (owner) chain.owner = owner;
+        if (contractAddress) chain.contractAddress = contractAddress;
         chain.txs.push(tx);
         file.chain = chain;
         file.updatedAt = tx.at;
+
+        if (chainCaseId) {
+          const targetKey = chainCaseId;
+          const existing = ledger.cases[targetKey];
+          if (
+            existing &&
+            existing !== file &&
+            existing.chain?.contractAddress &&
+            contractAddress &&
+            existing.chain.contractAddress.toLowerCase() !== contractAddress.toLowerCase()
+          ) {
+            // Do not overwrite case from another contract address! Use scoped key
+            ledger.cases[`${contractAddress.toLowerCase()}:${targetKey}`] = file;
+          } else {
+            ledger.cases[targetKey] = file;
+          }
+        }
         set({ ledger });
       },
     }),

@@ -102,7 +102,8 @@ export function NewCase({ parentId }: { parentId: string }) {
   }
 
   function enterManifest() {
-    const requestId = crypto.randomUUID();
+    const fromParam = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("requestId") : null;
+    const requestId = fromParam || draft.clientRequestId || crypto.randomUUID();
     const next = { ...draft, clientRequestId: requestId, updatedAt: new Date().toISOString() };
     setDraft(next);
     saveDraft(next);

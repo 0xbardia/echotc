@@ -4,8 +4,20 @@ import { useEffect, useMemo, useState } from "react";
 import { chainConfigured, CONTRACT_ADDRESS, DEPLOYMENT_TX } from "@/lib/echo/chain";
 import { chainExecutionSucceeded, isChainCaseId, nextChainCall, type ChainSnapshot } from "@/lib/echo/chain-plan";
 import { callView, plan, removalImpact, retryable, type ViewName } from "@/lib/echo/engine";
-import { useEcho } from "@/lib/echo/store";
+import { getIsolatedCase, useEcho } from "@/lib/echo/store";
 import type { CaseFile, Relationship } from "@/lib/echo/types";
+import {
+  findInFlightOperation,
+  prepareOperation,
+  recordBroadcast,
+  recordSuccess,
+  recordTerminalRejection,
+  recordTimeout,
+  recordUserRejection,
+  reconcileOperation,
+  withCrossTabLock,
+  type DurableOperation,
+} from "@/lib/echo/operation-lock";
 import { useLedgerReady } from "./use-ledger";
 
 const readOnChain = createClientOnlyFn(async (method: string, args: string[]) => {
@@ -20,6 +32,18 @@ const submitOnChain = createClientOnlyFn(async (method: string, args: string[], 
   return { ...submitted, ...settled, caseId: settled.tx ? mod.returnedCaseId(settled.tx) : null };
 });
 
+const lookupTxOnChain = createClientOnlyFn(async (hash: string) => {
+  const { createClient } = await import("genlayer-js");
+  const { studionet } = await import("genlayer-js/chains");
+  const client = createClient({ chain: studionet });
+  try {
+    const tx = await client.getTransaction({ hash: hash as never });
+    return tx as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+});
+
 const challengeOnChain = createClientOnlyFn(async (txId: `0x${string}`, account: `0x${string}` | null) => {
   const mod = await import("@/lib/echo/chain.client");
   return mod.challengeChain(txId, account);
@@ -30,16 +54,21 @@ const readRelationshipsOnChain = createClientOnlyFn(async (id: string) => {
   return mod.readRelationships(id);
 });
 
-const readSnapshot = createClientOnlyFn(async (caseId: string, sourceIds: string[]) => {
+const readSnapshot = createClientOnlyFn(async (caseId: string, sourceIds?: string[]) => {
   const mod = await import("@/lib/echo/chain.client");
   const caseRead = await mod.readChain("get_case", [caseId]);
   if (!caseRead.ok) throw new Error(caseRead.error);
   const parsed = typeof caseRead.value === "string" ? JSON.parse(caseRead.value) : caseRead.value;
   if (parsed && parsed.found === false) throw new Error("Studionet has no case with that id.");
 
+  const ids =
+    sourceIds && sourceIds.length > 0
+      ? sourceIds
+      : (parsed.manifest?.sources || []).map((s: { id: string }) => s.id);
+
   const [relResult, ...reviews] = await Promise.all([
     mod.readRelationships(caseId),
-    ...sourceIds.map((sourceId) => mod.readChain("get_source_review", [caseId, sourceId])),
+    ...ids.map((sourceId: string) => mod.readChain("get_source_review", [caseId, sourceId])),
   ]);
 
   const relationships = relResult.relationships;
@@ -77,7 +106,7 @@ function statusLabel(file: CaseFile) {
 
 export function CaseDesk({ id }: { id: string }) {
   const ready = useLedgerReady();
-  const localFile = useEcho((state) => state.ledger.cases[id]);
+  const localFile = useEcho((state) => getIsolatedCase(state.ledger, id, CONTRACT_ADDRESS));
   const ledger = useEcho((state) => state.ledger);
   const principal = useEcho((state) => state.principal);
   const approveNext = useEcho((state) => state.approveNext);
@@ -95,6 +124,7 @@ export function CaseDesk({ id }: { id: string }) {
   const [challengeNote, setChallengeNote] = useState("");
   const [chainNote, setChainNote] = useState("");
   const [chainBusy, setChainBusy] = useState(false);
+  const [activeOp, setActiveOp] = useState<DurableOperation | null>(null);
   const [error, setError] = useState("");
   const [mirror, setMirror] = useState<{ snapshot: ChainSnapshot | null; report: string | null; reportError: string | null } | null>(null);
   const navigate = useNavigate();
@@ -103,6 +133,7 @@ export function CaseDesk({ id }: { id: string }) {
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [remoteNotFound, setRemoteNotFound] = useState(false);
   const [mirrorLoading, setMirrorLoading] = useState(false);
+  const [mirrorRefreshIndex, setMirrorRefreshIndex] = useState(0);
 
   useEffect(() => {
     if (localFile || !ready) return;
@@ -175,6 +206,7 @@ export function CaseDesk({ id }: { id: string }) {
           chain: {
             caseId: parsed.id,
             owner: parsed.owner,
+            contractAddress: CONTRACT_ADDRESS,
             txs: [],
           },
           createdAt: parsed.createdAt || "on-chain",
@@ -193,7 +225,20 @@ export function CaseDesk({ id }: { id: string }) {
   const activeFile = localFile || remoteCase;
   const step = activeFile ? plan(activeFile) : null;
   const impact = activeFile ? removalImpact(activeFile, hidden) : null;
-  const owned = activeFile?.owner === principal;
+  
+  const rawOnChainOwner = mirror?.snapshot?.owner || activeFile?.chain?.owner || activeFile?.owner || "";
+  const isOwner = Boolean(
+    principal.startsWith("0x") &&
+      rawOnChainOwner &&
+      principal.toLowerCase() === rawOnChainOwner.toLowerCase()
+  );
+  const owned = isOwner;
+
+  const isWrongContract = Boolean(
+    activeFile?.chain?.contractAddress &&
+      activeFile.chain.contractAddress.toLowerCase() !== CONTRACT_ADDRESS.toLowerCase()
+  );
+
   const chainCaseId = activeFile?.chain?.caseId ?? (isChainCaseId(id) ? id : "");
   const chainFinal = Boolean(
     activeFile?.chain?.txs.some((tx: { method: string; execution: string }) => tx.method === "finalize_case" && chainExecutionSucceeded(tx.execution)) ||
@@ -207,7 +252,21 @@ export function CaseDesk({ id }: { id: string }) {
         : mirror?.snapshot
           ? nextChainCall(activeFile, mirror.snapshot, "preview")
           : null;
-  const readyToSign = !chainCaseId || Boolean(mirror?.snapshot) || Boolean(mirror?.reportError);
+  const readyToSign = Boolean(!chainCaseId || (mirror?.snapshot && !mirror?.reportError));
+
+  const canSign = Boolean(
+    isOwner &&
+      !isWrongContract &&
+      !chainBusy &&
+      !activeOp &&
+      !mirrorLoading &&
+      !chainFinal &&
+      chainConfigured() &&
+      principal.startsWith("0x") &&
+      readyToSign &&
+      upcoming &&
+      !mirror?.reportError
+  );
 
   useEffect(() => {
     if (!chainCaseId || !activeFile) return;
@@ -237,7 +296,42 @@ export function CaseDesk({ id }: { id: string }) {
     return () => {
       cancel = true;
     };
-  }, [chainCaseId, activeFile]);
+  }, [chainCaseId, activeFile, mirrorRefreshIndex]);
+
+  useEffect(() => {
+    if (!principal.startsWith("0x")) {
+      setActiveOp(null);
+      return;
+    }
+    const targetCaseId = chainCaseId || (activeFile ? activeFile.id : id);
+    const existing = findInFlightOperation(61999, CONTRACT_ADDRESS, principal, targetCaseId);
+    setActiveOp(existing);
+
+    if (
+      existing &&
+      existing.hash &&
+      (existing.status === "BROADCASTED" || existing.status === "ACCEPTED" || existing.status === "TIMEOUT")
+    ) {
+      let cancel = false;
+      void (async () => {
+        try {
+          const { changed } = await reconcileOperation(existing, async (h) => {
+            return await lookupTxOnChain(h);
+          });
+          if (cancel) return;
+          if (changed) {
+            setActiveOp(findInFlightOperation(61999, CONTRACT_ADDRESS, principal, targetCaseId));
+            setMirrorRefreshIndex((n) => n + 1);
+          }
+        } catch {
+          // ignore lookup errors
+        }
+      })();
+      return () => {
+        cancel = true;
+      };
+    }
+  }, [principal, chainCaseId, activeFile, id, mirrorRefreshIndex]);
 
   const families = activeFile?.report?.families ?? [];
   const sourceTitle = useMemo(() => {
@@ -288,60 +382,144 @@ export function CaseDesk({ id }: { id: string }) {
 
   async function onChain() {
     if (!principal.startsWith("0x")) return;
-    const chainOwner = (mirror?.snapshot?.owner || file.chain?.owner || "").toLowerCase();
-    if (chainOwner && chainOwner !== principal.toLowerCase()) {
+    if (chainBusy || activeOp) return;
+    if (file.chain?.contractAddress && file.chain.contractAddress.toLowerCase() !== CONTRACT_ADDRESS.toLowerCase()) {
+      setChainNote(`This case belongs to contract ${file.chain.contractAddress}, not currently configured ${CONTRACT_ADDRESS}. Nothing was sent.`);
+      return;
+    }
+    if (file.chain?.txs?.length && !file.chain?.contractAddress) {
+      setChainNote(`This legacy case has chain history without a recorded contract address. It cannot trigger writes against new deployment ${CONTRACT_ADDRESS}.`);
+      return;
+    }
+    if (!isOwner) {
       setChainNote("This Studionet case is owned by a different account. Nothing was sent.");
       return;
     }
-    setChainBusy(true);
-    setChainNote("Preparing the next contract call from the current Studionet read.");
+
+    const targetCaseId = chainCaseId || file.id;
+
     try {
-      let snapshot: ChainSnapshot | null = null;
-      if (file.chain?.caseId) {
-        const sourceIds = file.manifest.sources.map((source) => source.id);
-        snapshot = await readSnapshot(file.chain.caseId, sourceIds);
-      }
-      const batchId = `b-${Date.now().toString(36)}`;
-      const call = nextChainCall(file, snapshot, batchId);
-      if (!call) {
-        setChainNote("No further Studionet write is waiting. The chain case is finalized or unreadable as an open case.");
-        return;
-      }
-      setChainNote(`Wallet prompt for ${call.method}. Consensus has not finished.`);
-      const submitted = await submitOnChain(call.method, call.args, principal as `0x${string}`);
-      if (!submitted) throw new Error("Wallet submission is only available in the browser.");
-      const chainCaseId = submitted.caseId || snapshot?.caseId || file.chain?.caseId || null;
-      let owner = snapshot?.owner || file.chain?.owner || null;
-      if (submitted.ok && chainCaseId) {
-        try {
-          const confirmed = await readSnapshot(chainCaseId, file.manifest.sources.map((source) => source.id));
-          owner = confirmed.owner;
-        } catch (reason) {
-          owner = owner || null;
-          setError(reason instanceof Error ? reason.message : "The transaction finalized, but the follow-up read failed.");
+      await withCrossTabLock(`echotc-case-${targetCaseId}`, async () => {
+        const existingInFlight = findInFlightOperation(61999, CONTRACT_ADDRESS, principal, targetCaseId);
+        if (existingInFlight) {
+          setActiveOp(existingInFlight);
+          setChainNote(`Transaction ${existingInFlight.hash || existingInFlight.logicalOp} is already in flight. Duplicate submission prevented.`);
+          return;
         }
-      }
-      recordChain(
-        file.id,
-        {
+
+        setChainBusy(true);
+        setChainNote("Preparing the next contract call from the current Studionet read.");
+
+        let snapshot: ChainSnapshot | null = mirror?.snapshot || null;
+        if (file.chain?.caseId && !snapshot) {
+          const sourceIds = file.manifest.sources.map((source) => source.id);
+          snapshot = await readSnapshot(file.chain.caseId, sourceIds);
+        }
+
+        const freshBatchId = `b-${Date.now().toString(36)}`;
+        const call = nextChainCall(file, snapshot, freshBatchId);
+        if (!call) {
+          setChainNote("No further Studionet write is waiting. The chain case is finalized or unreadable as an open case.");
+          setChainBusy(false);
+          return;
+        }
+
+        const batchId =
+          call.method === "review_sources_batch" || call.method === "review_relationship_batch"
+            ? call.args[1] || freshBatchId
+            : null;
+
+        const { op: durableOp } = prepareOperation({
+          chainId: 61999,
+          contractAddress: CONTRACT_ADDRESS,
+          account: principal,
+          caseId: targetCaseId,
           method: call.method,
-          hash: submitted.hash,
-          statusName: submitted.statusName,
-          execution: submitted.execution,
-          at: new Date().toISOString(),
-          detail: submitted.ok ? `${call.method} finalized with ${submitted.execution}.` : submitted.error,
-        },
-        chainCaseId,
-        owner,
-      );
-      if (submitted.ok && chainCaseId && file.id !== chainCaseId) {
-        void navigate({ to: "/cases/$id", params: { id: chainCaseId } });
-      }
-      setChainNote(
-        submitted.ok
-          ? `${call.method} ${submitted.hash} finalized ${submitted.statusName} / ${submitted.execution}. Chain case ${chainCaseId || "not returned"}.`
-          : `${call.method} ${submitted.hash} did not succeed. ${submitted.error}`,
-      );
+          args: call.args,
+          batchId,
+        });
+        setActiveOp(durableOp);
+
+        setChainNote(`Wallet prompt for ${call.method}. Consensus has not finished.`);
+        let submitted;
+        try {
+          submitted = await submitOnChain(call.method, call.args, principal as `0x${string}`);
+        } catch (err) {
+          recordUserRejection(durableOp.key, err instanceof Error ? err.message : "User rejected transaction.");
+          setActiveOp(null);
+          throw err;
+        }
+
+        if (!submitted) {
+          recordUserRejection(durableOp.key, "Wallet submission returned empty.");
+          setActiveOp(null);
+          throw new Error("Wallet submission is only available in the browser.");
+        }
+
+        recordBroadcast(durableOp.key, submitted.hash);
+
+        if (submitted.statusName === "TIMEOUT" || (!submitted.ok && submitted.error?.includes("Timed out"))) {
+          recordTimeout(durableOp.key);
+          setActiveOp(findInFlightOperation(61999, CONTRACT_ADDRESS, principal, targetCaseId));
+        } else if (submitted.ok) {
+          recordSuccess(durableOp.key, { statusName: submitted.statusName, execution: submitted.execution });
+          setActiveOp(null);
+        } else {
+          recordTerminalRejection(durableOp.key, {
+            statusName: submitted.statusName,
+            execution: submitted.execution,
+            error: submitted.error,
+          });
+          setActiveOp(null);
+        }
+
+        const resolvedCaseId = submitted.caseId || snapshot?.caseId || file.chain?.caseId || null;
+        let owner = snapshot?.owner || file.chain?.owner || null;
+        if (submitted.ok && resolvedCaseId) {
+          try {
+            const confirmed = await readSnapshot(resolvedCaseId, file.manifest.sources.map((source) => source.id));
+            const confirmedReport = await readOnChain("get_report", [resolvedCaseId]);
+            owner = confirmed.owner;
+            setMirror({
+              snapshot: confirmed,
+              report: confirmedReport?.ok
+                ? typeof confirmedReport.value === "string"
+                  ? confirmedReport.value
+                  : JSON.stringify(confirmedReport.value)
+                : null,
+              reportError: confirmedReport && !confirmedReport.ok ? confirmedReport.error : null,
+            });
+          } catch (reason) {
+            owner = owner || null;
+            setError(reason instanceof Error ? reason.message : "The transaction finalized, but the follow-up read failed.");
+          }
+        }
+
+        recordChain(
+          file.id,
+          {
+            method: call.method,
+            hash: submitted.hash,
+            statusName: submitted.statusName,
+            execution: submitted.execution,
+            at: new Date().toISOString(),
+            detail: submitted.ok ? `${call.method} finalized with ${submitted.execution}.` : submitted.error,
+          },
+          resolvedCaseId,
+          owner,
+          CONTRACT_ADDRESS,
+          file,
+        );
+
+        if (submitted.ok && resolvedCaseId && file.id !== resolvedCaseId) {
+          void navigate({ to: "/cases/$id", params: { id: resolvedCaseId } });
+        }
+        setChainNote(
+          submitted.ok
+            ? `${call.method} ${submitted.hash} finalized ${submitted.statusName} / ${submitted.execution}. Chain case ${resolvedCaseId || "not returned"}.`
+            : `${call.method} ${submitted.hash} did not succeed. ${submitted.error}`,
+        );
+      });
     } catch (reason) {
       setChainNote(reason instanceof Error ? reason.message : "Chain write failed before submission.");
     } finally {
@@ -479,9 +657,14 @@ export function CaseDesk({ id }: { id: string }) {
             ? `Chain case ${file.chain.caseId}. Owner ${mirror?.snapshot?.owner || file.chain.owner || "unread"}. Status ${mirror?.snapshot?.status || "loading"}.`
             : "No Studionet case yet. The first signature creates one from this manifest."}
         </p>
-        {remoteCase && !owned ? (
+        {!isOwner ? (
           <div className="banner banner-warn" role="status">
-            <p>Read-only: This case is owned on Studionet by {remoteCase.owner}. You can inspect evidence and view contract reports, but only the owner can submit subsequent transactions.</p>
+            <p>Read-only: This case is owned on Studionet by {rawOnChainOwner || file.owner}. You can inspect evidence and view contract reports, but only the owner can submit subsequent transactions.</p>
+          </div>
+        ) : null}
+        {isWrongContract ? (
+          <div className="banner banner-warn" role="status">
+            <p>Wrong contract: This case belongs to contract {file.chain?.contractAddress}, not currently configured {CONTRACT_ADDRESS}. Submissions are refused.</p>
           </div>
         ) : null}
         <div className="row">
@@ -489,16 +672,26 @@ export function CaseDesk({ id }: { id: string }) {
             className="btn btn-primary"
             type="button"
             data-testid="submit-wallet"
-            disabled={chainBusy || mirrorLoading || chainFinal || !chainConfigured() || !principal.startsWith("0x") || !readyToSign || !upcoming}
+            disabled={!canSign}
             onClick={() => void onChain()}
           >
-            {mirrorLoading
-              ? "Refreshing chain state…"
-              : chainBusy
-                ? "Waiting for consensus…"
-                : chainFinal
-                  ? "Finalized on Studionet"
-                  : "Sign this step"}
+            {activeOp
+              ? activeOp.status === "TIMEOUT"
+                ? "Transaction pending on chain (waiter timed out)"
+                : `In flight: ${activeOp.logicalOp} (${activeOp.statusName || "submitted"})`
+              : mirrorLoading
+                ? "Refreshing chain state…"
+                : chainBusy
+                  ? "Waiting for consensus…"
+                  : chainFinal
+                    ? "Finalized on Studionet"
+                    : isWrongContract
+                      ? "Wrong contract deployment"
+                      : !isOwner
+                        ? "Read-only: Connected account is not the owner"
+                        : mirror?.reportError
+                          ? "Studionet read failed"
+                          : "Sign this step"}
           </button>
         </div>
         {!principal.startsWith("0x") ? <p className="muted">Connect a Studionet account first. Nothing is sent from the preview principal.</p> : null}
@@ -533,7 +726,19 @@ export function CaseDesk({ id }: { id: string }) {
             <p className="url">{mirror.report}</p>
           </div>
         ) : null}
-        {mirror?.reportError ? <p className="muted">{mirror.reportError}</p> : null}
+        {mirror?.reportError ? (
+          <div className="banner banner-warn" role="alert">
+            <p>Studionet read failed: {mirror.reportError}</p>
+            <button
+              className="btn"
+              type="button"
+              data-testid="retry-mirror-read"
+              onClick={() => setMirrorRefreshIndex((i) => i + 1)}
+            >
+              Retry Studionet read
+            </button>
+          </div>
+        ) : null}
         {mirror?.snapshot?.reviews?.length ? (
           <ul className="list">
             {mirror.snapshot.reviews.map((review) => (

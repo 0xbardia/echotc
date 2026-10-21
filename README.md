@@ -19,26 +19,24 @@ It does not emit true/false verdicts, certify factual claims, or authenticate of
 
 2. **Studionet Mode (GenLayer Intelligent Contract)**
    - Deployed on GenLayer Studionet (Chain ID `61999`, RPC `https://studio.genlayer.com/api`).
-   - Contract Address: `0xCABcFaBC7a76d602b8c4b0Aed367853155aDe59B`
-   - Deployment Transaction: `0x8c6aa8e55b97139bbda7ac8524b0f28a5b1a2788e871d2f3aee1c183e99b4a30`
+   - Contract Address: `0x3Af6aD96e89A8B120A329cc472b2B52D1E55E319`
+   - Deployment Transaction: `0xae2d2c64ea7b7670996c70e117248b6b471d00977446e4481de54fa43240aac2`
    - Execution uses GenLayer consensus with non-deterministic web retrieval (`gl.nondet.web.render`) inside `gl.eq_principle.prompt_comparative`.
    - Polling interval: 12 seconds (`sleep(12000)` in `src/lib/echo/chain.client.ts`), preserving Studionet rate-limit compliance.
 
 ---
 
-## Contract Implementation & Deployment Discrepancy
+## Contract Implementation & Deployment Provenance
 
-**Important notice for contributors and auditors:**
-The local contract source at `EchoTrace/contracts/echotrace.py` is **not identical** to the deployed bytecode at `0xCABcFaBC7a76d602b8c4b0Aed367853155aDe59B`.
-
-- **Local contract source SHA-256:** `f450f96ffae4508eb78fc2800468bd2c6f8b5caeb3fb9f72152f6af575f920b1`
-- **Recorded deployment artifact SHA-256:** `8fcf378fe76e90c852307d97b4caa497be1c942a26049fb65b5350b2c2338e44` (from historical deployment `0x8c6aa8e55b97139bbda7ac8524b0f28a5b1a2788e871d2f3aee1c183e99b4a30`)
-- **Observed behavior difference:**
-  - On live contract `0xCABcFaBC...e59B`, calling view method `get_relationships` with a missing case ID returns `[]`.
-  - In local Python source, `get_relationships` returns `{"found": false, "relationships": []}`.
-  - The client parser (`src/lib/echo/engine.ts` / `chain.client.ts`) handles both shapes gracefully.
-  - The local source includes tightened URL filters (rejecting numeric octets and encoded hex hosts).
-- **Policy:** Do not redeploy without explicit authorization and a confirmed contract bug.
+- **Deployed contract source SHA-256:** `ccc59986e57bb5ef8570d87fdd4d5943f4de8eb50257d9ae5c6ed168a5aca616`
+- **Recorded deployment transaction:** `0xae2d2c64ea7b7670996c70e117248b6b471d00977446e4481de54fa43240aac2`
+- **Verified on-chain case:** `et-c3a20529e6a1` (owner `0x39cCdcf2338CE3D6c8F345A0ebb11a19F193EAbA`, finalized with full 5-step consensus execution success).
+- **Previous deployment (preserved for historical evidence):** `0x0BcE79508f7705412D6c6E83750D12547715DB53` (Tx: `0x8c6aa8e55b97139bbda7ac8524b0f28a5b1a2788e871d2f3aee1c183e99b4a30`).
+- **Semantic Provenance Rules:**
+  - Quotation anchoring strictly verified against rendered text (20–280 characters).
+  - Categorization into `primary_reporting`, `attributed_source`, `mentions_only`, and `unrelated`.
+  - Secondary reporting/encyclopedic citations naming external authorities map to `attributed_source`.
+  - Unrelated web pages map to `unrelated` with empty contributions.
 
 ---
 

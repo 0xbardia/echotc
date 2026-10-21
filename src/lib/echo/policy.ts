@@ -194,13 +194,34 @@ export function buildSources(urls: string[], discoveries: string[]): SourceRef[]
   });
 }
 
+function asciiEscape(str: string): string {
+  return JSON.stringify(str).replace(/[\u007f-\uffff]/g, (c) => {
+    return "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0");
+  });
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    if (typeof value === "string") {
+      return asciiEscape(value);
+    }
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return "[" + value.map(canonicalJson).join(",") + "]";
+  }
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return "{" + keys.map((k) => asciiEscape(k) + ":" + canonicalJson(obj[k])).join(",") + "}";
+}
+
 export function canonicalManifest(input: {
   claim: string;
   sources: SourceRef[];
   clientRequestId: string;
   parentCaseId: string | null;
 }): string {
-  return JSON.stringify({
+  return canonicalJson({
     claim: normalizeSpace(input.claim),
     language: "en",
     sources: input.sources.map((s) => ({
