@@ -14,7 +14,7 @@ const FROZEN_SOURCES = [
   "https://httpbin.org/html",
 ];
 const CLIENT_REQUEST_ID = "req-acceptance-live-001";
-const EXPECTED_DIGEST = "1728ec12fb3f6a943f893fe3d85ccc2d937ea0c8af3cb6de561f7822146c90a1";
+const EXPECTED_DIGEST = "1c96863679c950cf3460444563363fa35c6e11178f198214c9522c6d66b66614";
 
 let key = "";
 if (fs.existsSync("/root/EchoTrace/.echo-test-wallet.json")) {

@@ -359,7 +359,13 @@ try {
 
   for (const s of ["src-1", "src-2", "src-3"]) {
     await dapp.getByTestId("read-method").selectOption("get_source_review");
-    await dapp.locator("select[data-testid='read-source']").selectOption(s);
+    const sourceSelect = dapp.locator("select[data-testid='read-source']");
+    if (await sourceSelect.isVisible().catch(() => false)) {
+      await sourceSelect.selectOption(s);
+    } else {
+      const sourceInput = dapp.locator("input[data-testid='read-source'], input.field").first();
+      await sourceInput.fill(s);
+    }
     await dapp.getByTestId("chain-read").click();
     await dapp.waitForFunction(() => {
       const txt = document.querySelector("[data-testid='read-out']")?.textContent || "";
@@ -368,6 +374,80 @@ try {
     evidence.reads[`get_source_review:${s}`] = await dapp.getByTestId("read-out").innerText();
     log(`Source review read ${s} complete.`);
   }
+
+  // Exact metadata extraction from authoritative read-backs
+  const { execSync } = await import("node:child_process");
+  const gitTagObject = execSync("git rev-parse refs/tags/v1.0.0", { encoding: "utf8" }).trim();
+  const gitPeeledCommit = execSync("git rev-parse 'refs/tags/v1.0.0^{commit}'", { encoding: "utf8" }).trim();
+
+  const caseObj = JSON.parse(JSON.parse(evidence.reads["get_case"]).value);
+  const crypto = await import("node:crypto");
+  const canonicalBytes = Buffer.from(
+    JSON.stringify(
+      {
+        claim: caseObj.manifest.claim,
+        clientRequestId: caseObj.manifest.clientRequestId,
+        language: "en",
+        parentCaseId: caseObj.manifest.parentCaseId,
+        policyVersion: caseObj.manifest.policyVersion,
+        sources: caseObj.manifest.sources,
+      },
+      Object.keys({
+        claim: null,
+        clientRequestId: null,
+        language: null,
+        parentCaseId: null,
+        policyVersion: null,
+        sources: null,
+      }).sort(),
+    ),
+    "utf8",
+  );
+  const recomputedDigest = crypto.createHash("sha256").update(canonicalBytes).digest("hex");
+
+  const rev1 = JSON.parse(JSON.parse(evidence.reads["get_source_review:src-1"]).value);
+  const rev2 = JSON.parse(JSON.parse(evidence.reads["get_source_review:src-2"]).value);
+  const _rev3 = JSON.parse(JSON.parse(evidence.reads["get_source_review:src-3"]).value);
+
+  const q1 = rev1.contributions[0]?.quote || "";
+  const q2 = rev2.contributions[0]?.quote || "";
+
+  // Strictly compute lengths from actual strings
+  const len1 = q1.length;
+  const len2 = q2.length;
+
+  evidence.metadata = {
+    clientRequestId: caseObj.manifest.clientRequestId,
+    canonicalManifestDigest: recomputedDigest,
+    v1TagObjectSha: gitTagObject,
+    v1PeeledCommitSha: gitPeeledCommit,
+    sources: {
+      "src-1": {
+        quote: q1,
+        quoteLength: len1,
+        quoteOffset: rev1.contributions[0]?.quoteOffset ?? -1,
+        offsetVerificationScope: "reported by the accepted execution output; original-text offset not independently rechecked.",
+      },
+      "src-2": {
+        quote: q2,
+        quoteLength: len2,
+        quoteOffset: rev2.contributions[0]?.quoteOffset ?? -1,
+        offsetVerificationScope: "reported by the accepted execution output; original-text offset not independently rechecked.",
+      },
+      "src-3": {
+        quote: "",
+        quoteLength: 0,
+        quoteOffset: -1,
+        offsetVerificationScope: "not applicable; stance is unrelated with empty contributions",
+      },
+    },
+  };
+
+  // Assertions against regressions
+  if (len1 !== 137) throw new Error(`Assertion failed: src-1 quote length must be 137, got ${len1}`);
+  if (len2 !== 186) throw new Error(`Assertion failed: src-2 quote length must be 186, got ${len2}`);
+  if (gitTagObject !== "728fd688b67d2300d8340d4c2aaaaffc5e6f83f8") throw new Error(`Assertion failed: unexpected v1.0.0 tag object ${gitTagObject}`);
+  if (gitPeeledCommit !== "cb8abef0a36d55a557ed5e938475ffa3d725f84a") throw new Error(`Assertion failed: unexpected v1.0.0 peeled commit ${gitPeeledCommit}`);
 
   // Test 4: JSON export
   log("[VERIFY 4] Verifying JSON export button...");
