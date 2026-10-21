@@ -3,18 +3,32 @@ import { createPublicClient, createWalletClient, http, parseEventLogs } from "vi
 import { privateKeyToAccount } from "viem/accounts";
 import { studionet } from "genlayer-js/chains";
 import { chromium } from "playwright";
+import { computeCanonicalManifestDigest } from "./generate-acceptance-evidence.mjs";
 
 const STAGING_URL = "http://127.0.0.1:8082";
 const EXPECTED_CONTRACT = "0x0BcE79508f7705412D6c6E83750D12547715DB53";
 const EXPECTED_SIGNER = "0x1BD6Eabf3fE310822835F678396c83b7e5EA859B";
-const FROZEN_CLAIM = "The domain names example.com, example.net, and example.org are reserved for documentation purposes.";
+const FROZEN_CLAIM =
+  "The domain names example.com, example.net, and example.org are reserved for documentation purposes.";
 const FROZEN_SOURCES = [
   "https://www.iana.org/domains/reserved",
   "https://en.wikipedia.org/wiki/Example.com",
   "https://httpbin.org/html",
 ];
 const CLIENT_REQUEST_ID = "req-acceptance-live-001";
-const EXPECTED_DIGEST = "1c96863679c950cf3460444563363fa35c6e11178f198214c9522c6d66b66614";
+const EXPECTED_DIGEST = computeCanonicalManifestDigest({
+  claim: FROZEN_CLAIM,
+  clientRequestId: CLIENT_REQUEST_ID,
+  language: "en",
+  parentCaseId: null,
+  policyVersion: "echotrace-policy-1.0.0",
+  sources: FROZEN_SOURCES.map((url, i) => ({
+    id: `src-${i + 1}`,
+    parentSourceId: null,
+    role: "submitted",
+    url,
+  })),
+});
 
 let key = "";
 if (fs.existsSync("/root/EchoTrace/.echo-test-wallet.json")) {
@@ -43,7 +57,11 @@ const submittedTxs = [];
 
 async function sendTx(tx) {
   // Target contract safety check
-  if (tx.to && tx.to.toLowerCase() !== EXPECTED_CONTRACT.toLowerCase() && tx.to.toLowerCase() !== studionet.consensusMainContract.address.toLowerCase()) {
+  if (
+    tx.to &&
+    tx.to.toLowerCase() !== EXPECTED_CONTRACT.toLowerCase() &&
+    tx.to.toLowerCase() !== studionet.consensusMainContract.address.toLowerCase()
+  ) {
     console.warn(`Transaction target ${tx.to} differs from expected contract ${EXPECTED_CONTRACT}`);
   }
   const hash = await wallet.sendTransaction({
@@ -82,7 +100,9 @@ const page = await context.newPage();
 page.setDefaultTimeout(60_000);
 
 await page.exposeFunction("__echoSend", (tx) => sendTx(tx));
-await page.exposeFunction("__echoSign", (message) => account.signMessage({ message: { raw: message } }));
+await page.exposeFunction("__echoSign", (message) =>
+  account.signMessage({ message: { raw: message } }),
+);
 
 await page.addInitScript((signerAddress) => {
   let connected = false;
@@ -153,8 +173,12 @@ const results = {
 };
 
 try {
-  console.log(`[STAGE 1] Navigating to staging intake desk ${STAGING_URL}/app/new?requestId=${CLIENT_REQUEST_ID}`);
-  await page.goto(`${STAGING_URL}/app/new?requestId=${CLIENT_REQUEST_ID}`, { waitUntil: "networkidle" });
+  console.log(
+    `[STAGE 1] Navigating to staging intake desk ${STAGING_URL}/app/new?requestId=${CLIENT_REQUEST_ID}`,
+  );
+  await page.goto(`${STAGING_URL}/app/new?requestId=${CLIENT_REQUEST_ID}`, {
+    waitUntil: "networkidle",
+  });
   await page.evaluate(() => window.dispatchEvent(new Event("eip6963:requestProvider")));
   await page.waitForTimeout(1000);
 
@@ -191,12 +215,15 @@ try {
   // Run preflight
   console.log("[STAGE 1] Running preflight check...");
   await page.getByTestId("run-preflight").click();
-  
+
   // Wait for preflight to finish and "Continue to manifest" to be enabled
-  await page.waitForFunction(() => {
-    const btn = document.querySelector("[data-testid='to-manifest']");
-    return btn && !btn.disabled;
-  }, { timeout: 60_000 });
+  await page.waitForFunction(
+    () => {
+      const btn = document.querySelector("[data-testid='to-manifest']");
+      return btn && !btn.disabled;
+    },
+    { timeout: 60_000 },
+  );
 
   // Step 2 -> Step 3: Enter manifest
   await page.getByTestId("to-manifest").click();
@@ -213,7 +240,9 @@ try {
     console.log(`[STAGE 1] Mounted existing authoritative case ${existingCaseId}`);
   } else {
     // If not mounted, go through intake
-    await page.goto(`${STAGING_URL}/app/new?requestId=${CLIENT_REQUEST_ID}`, { waitUntil: "networkidle" });
+    await page.goto(`${STAGING_URL}/app/new?requestId=${CLIENT_REQUEST_ID}`, {
+      waitUntil: "networkidle",
+    });
     await page.getByTestId("confirm-manifest").check();
     await page.getByTestId("create-case").click();
     await page.getByTestId("chain-panel").waitFor({ timeout: 15_000 });
@@ -252,20 +281,32 @@ try {
     if (await button.isDisabled()) {
       // If button disabled because mirror is still loading, wait up to 30s more
       console.log(`[PHASE ${phase}] Submit button disabled, waiting for mirror hydration...`);
-      await page.waitForFunction(() => {
-        const btn = document.querySelector("[data-testid='submit-wallet']");
-        const text = btn?.textContent || "";
-        return btn && (!btn.disabled || text.includes("Finalized"));
-      }, { timeout: 45_000 }).catch(() => {});
+      await page
+        .waitForFunction(
+          () => {
+            const btn = document.querySelector("[data-testid='submit-wallet']");
+            const text = btn?.textContent || "";
+            return btn && (!btn.disabled || text.includes("Finalized"));
+          },
+          { timeout: 45_000 },
+        )
+        .catch(() => {});
 
       if (await button.isDisabled()) {
-        const noteText = await page.getByTestId("chain-note").innerText().catch(() => "");
+        const noteText = await page
+          .getByTestId("chain-note")
+          .innerText()
+          .catch(() => "");
         console.log(`[PHASE ${phase}] Note: ${noteText}`);
         break;
       }
     }
 
-    const noteBefore = (await page.getByTestId("chain-note").innerText().catch(() => "")) || "";
+    const noteBefore =
+      (await page
+        .getByTestId("chain-note")
+        .innerText()
+        .catch(() => "")) || "";
     console.log(`[PHASE ${phase}] Clicking "Sign this step" (${btnText})...`);
     await button.click();
 
@@ -273,7 +314,12 @@ try {
     await page.waitForFunction(
       (prev) => {
         const note = document.querySelector("[data-testid='chain-note']")?.textContent || "";
-        return note && note !== prev && !note.startsWith("Preparing") && !note.startsWith("Wallet prompt");
+        return (
+          note &&
+          note !== prev &&
+          !note.startsWith("Preparing") &&
+          !note.startsWith("Wallet prompt")
+        );
       },
       noteBefore,
       { timeout: 900_000 },
@@ -305,21 +351,30 @@ try {
     if (method === "get_source_review") {
       // Test src-1, src-2, src-3
       for (const s of ["src-1", "src-2", "src-3"]) {
-        await page.locator("select[data-testid='read-source']").selectOption(s).catch(() => {});
+        await page
+          .locator("select[data-testid='read-source']")
+          .selectOption(s)
+          .catch(() => {});
         await page.getByTestId("chain-read").click();
-        await page.waitForFunction(() => {
-          const text = document.querySelector("[data-testid='read-out']")?.textContent || "";
-          return text.includes("\"readAt\"");
-        }, { timeout: 60_000 });
+        await page.waitForFunction(
+          () => {
+            const text = document.querySelector("[data-testid='read-out']")?.textContent || "";
+            return text.includes('"readAt"');
+          },
+          { timeout: 60_000 },
+        );
         const val = await page.getByTestId("read-out").innerText();
         results.reads[`${method}:${s}`] = val;
       }
     } else {
       await page.getByTestId("chain-read").click();
-      await page.waitForFunction(() => {
-        const text = document.querySelector("[data-testid='read-out']")?.textContent || "";
-        return text.includes("\"readAt\"");
-      }, { timeout: 60_000 });
+      await page.waitForFunction(
+        () => {
+          const text = document.querySelector("[data-testid='read-out']")?.textContent || "";
+          return text.includes('"readAt"');
+        },
+        { timeout: 60_000 },
+      );
       const val = await page.getByTestId("read-out").innerText();
       results.reads[method] = val;
     }
@@ -335,10 +390,13 @@ try {
     console.log(`[STAGE 4] Testing clean context read-through for ${authoritativeCaseId}...`);
     const cleanContext = await browser.newContext();
     const cleanPage = await cleanContext.newPage();
-    await cleanPage.goto(`${STAGING_URL}/cases/${authoritativeCaseId}`, { waitUntil: "networkidle" });
+    await cleanPage.goto(`${STAGING_URL}/cases/${authoritativeCaseId}`, {
+      waitUntil: "networkidle",
+    });
     await cleanPage.waitForTimeout(3000);
     const cleanText = await cleanPage.locator("body").innerText();
-    results.cleanReadThroughSuccess = !cleanText.includes("Case not on this device") && cleanText.includes(authoritativeCaseId);
+    results.cleanReadThroughSuccess =
+      !cleanText.includes("Case not on this device") && cleanText.includes(authoritativeCaseId);
     console.log(`[STAGE 4] Clean session read-through success: ${results.cleanReadThroughSuccess}`);
     await cleanContext.close();
 
@@ -353,7 +411,8 @@ try {
         selectedAddress: "0x2222222222222222222222222222222222222222",
         chainId: "0xf22f",
         request: async ({ method }) => {
-          if (method === "eth_requestAccounts" || method === "eth_accounts") return ["0x2222222222222222222222222222222222222222"];
+          if (method === "eth_requestAccounts" || method === "eth_accounts")
+            return ["0x2222222222222222222222222222222222222222"];
           if (method === "eth_chainId") return "0xf22f";
           return null;
         },
@@ -361,16 +420,22 @@ try {
         removeListener: () => {},
       };
     });
-    await strangerPage.goto(`${STAGING_URL}/cases/${authoritativeCaseId}`, { waitUntil: "networkidle" });
+    await strangerPage.goto(`${STAGING_URL}/cases/${authoritativeCaseId}`, {
+      waitUntil: "networkidle",
+    });
     await strangerPage.waitForTimeout(3000);
     const strangerBody = await strangerPage.locator("body").innerText();
-    results.nonOwnerReadOnlyFlag = strangerBody.includes("Read-only: This case is owned on Studionet by");
+    results.nonOwnerReadOnlyFlag = strangerBody.includes(
+      "Read-only: This case is owned on Studionet by",
+    );
     console.log(`[STAGE 4] Non-owner read-only banner present: ${results.nonOwnerReadOnlyFlag}`);
     await strangerContext.close();
   }
 
   fs.writeFileSync("/tmp/staging-acceptance-results.json", JSON.stringify(results, null, 2));
-  console.log("[STAGE 5] Acceptance journey completed. Results saved to /tmp/staging-acceptance-results.json");
+  console.log(
+    "[STAGE 5] Acceptance journey completed. Results saved to /tmp/staging-acceptance-results.json",
+  );
 } catch (err) {
   console.error("ACCEPTANCE ERROR:", err);
   await page.screenshot({ path: "/tmp/acceptance-error.png", fullPage: true }).catch(() => {});

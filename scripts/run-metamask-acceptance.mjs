@@ -4,7 +4,8 @@ import { chromium } from "playwright";
 const STAGING_URL = "http://127.0.0.1:8082";
 const EXPECTED_CONTRACT = "0x3Af6aD96e89A8B120A329cc472b2B52D1E55E319";
 const OWNER_ADDRESS = "0x39cCdcf2338CE3D6c8F345A0ebb11a19F193EAbA";
-const FROZEN_CLAIM = "The domain names example.com, example.net, and example.org are reserved for documentation purposes.";
+const FROZEN_CLAIM =
+  "The domain names example.com, example.net, and example.org are reserved for documentation purposes.";
 const FROZEN_SOURCES = [
   "https://www.iana.org/domains/reserved",
   "https://en.wikipedia.org/wiki/Example.com",
@@ -47,11 +48,13 @@ async function ev(page, expression) {
     client = await context.newCDPSession(page);
     sessions.set(page, client);
   }
-  const res = await client.send("Runtime.evaluate", {
-    expression,
-    returnByValue: true,
-    awaitPromise: true,
-  }).catch((err) => ({ exceptionDetails: { exception: { description: err.message } } }));
+  const res = await client
+    .send("Runtime.evaluate", {
+      expression,
+      returnByValue: true,
+      awaitPromise: true,
+    })
+    .catch((err) => ({ exceptionDetails: { exception: { description: err.message } } }));
   if (res.exceptionDetails) {
     return { failed: String(res.exceptionDetails.exception?.description || "err").slice(0, 180) };
   }
@@ -74,7 +77,10 @@ async function unlockIfNeeded(page) {
   await page.keyboard.press("Control+A");
   await page.keyboard.press("Backspace");
   await page.keyboard.type(pw, { delay: 8 });
-  const submitted = await ev(page, `(() => { const f=document.querySelector('form'); if(!f) return 'no-form'; f.requestSubmit(); return 'ok'; })()`);
+  const submitted = await ev(
+    page,
+    `(() => { const f=document.querySelector('form'); if(!f) return 'no-form'; f.requestSubmit(); return 'ok'; })()`,
+  );
   log(`unlock result: ${submitted}`);
   await page.waitForTimeout(1500);
   return true;
@@ -99,8 +105,11 @@ async function approveOnce() {
   let acted = null;
   for (const page of mmPages()) {
     const url = page.url();
-    if (!url.includes("notification") && !url.includes("popup") && !url.includes("home.html")) continue;
-    const clicked = await ev(page, `(() => {
+    if (!url.includes("notification") && !url.includes("popup") && !url.includes("home.html"))
+      continue;
+    const clicked = await ev(
+      page,
+      `(() => {
       const ids = ${JSON.stringify(APPROVE_IDS)};
       for (const id of ids) {
         const el = document.querySelector('[data-testid="'+id+'"]');
@@ -110,7 +119,8 @@ async function approveOnce() {
       const btn = [...document.querySelectorAll("button")].find(b => allow.test((b.innerText||"").trim()) && !b.disabled);
       if (btn) { const t=btn.innerText.trim(); btn.click(); return "text:"+t; }
       return null;
-    })()`);
+    })()`,
+    );
     if (clicked && !clicked.failed) {
       acted = `${url.split("/").slice(-1)[0]} ${clicked}`;
       log(`MetaMask approved action: ${acted}`);
@@ -138,9 +148,13 @@ const evidence = {
 };
 
 try {
-  log(`[STAGE 1] Navigating to staging intake: ${STAGING_URL}/app/new?requestId=${CLIENT_REQUEST_ID}`);
+  log(
+    `[STAGE 1] Navigating to staging intake: ${STAGING_URL}/app/new?requestId=${CLIENT_REQUEST_ID}`,
+  );
   const dapp = await context.newPage();
-  await dapp.goto(`${STAGING_URL}/app/new?requestId=${CLIENT_REQUEST_ID}`, { waitUntil: "domcontentloaded" });
+  await dapp.goto(`${STAGING_URL}/app/new?requestId=${CLIENT_REQUEST_ID}`, {
+    waitUntil: "domcontentloaded",
+  });
   await dapp.waitForTimeout(1500);
 
   // Connect wallet
@@ -150,7 +164,7 @@ try {
     await connectBtn.click();
     await dapp.waitForTimeout(800);
     const mmOpt = dapp.locator("button").filter({ hasText: "MetaMask" });
-    if (await mmOpt.count() > 0) {
+    if ((await mmOpt.count()) > 0) {
       await mmOpt.first().click();
     }
     // Approve connect in MetaMask if prompted
@@ -160,7 +174,9 @@ try {
       if (acted) break;
       if (c === 3) {
         const note = await context.newPage();
-        await note.goto(`chrome-extension://${EXT}/notification.html`, { waitUntil: "domcontentloaded" }).catch(() => {});
+        await note
+          .goto(`chrome-extension://${EXT}/notification.html`, { waitUntil: "domcontentloaded" })
+          .catch(() => {});
         await note.waitForTimeout(600);
       }
       await dapp.waitForTimeout(400);
@@ -194,16 +210,22 @@ try {
   // Run preflight
   log("[STAGE 1] Running preflight check...");
   await dapp.getByTestId("run-preflight").click();
-  await dapp.waitForFunction(() => {
-    const btn = document.querySelector("[data-testid='to-manifest']");
-    return btn && !btn.disabled;
-  }, { timeout: 60000 });
+  await dapp.waitForFunction(
+    () => {
+      const btn = document.querySelector("[data-testid='to-manifest']");
+      return btn && !btn.disabled;
+    },
+    { timeout: 60000 },
+  );
 
   await dapp.getByTestId("to-manifest").click();
   await dapp.waitForTimeout(800);
 
   // Manifest digest check
-  const manifestDigest = await dapp.getByTestId("manifest-digest").innerText().catch(() => "");
+  const manifestDigest = await dapp
+    .getByTestId("manifest-digest")
+    .innerText()
+    .catch(() => "");
   log(`[STAGE 1] Manifest digest: ${manifestDigest}`);
   evidence.manifestDigest = manifestDigest;
 
@@ -246,12 +268,19 @@ try {
     }
 
     if (await submitBtn.isDisabled().catch(() => true)) {
-      const note = await dapp.getByTestId("chain-note").innerText().catch(() => "");
+      const note = await dapp
+        .getByTestId("chain-note")
+        .innerText()
+        .catch(() => "");
       log(`Button is disabled. Note: ${note}`);
       break;
     }
 
-    const noteBefore = (await dapp.getByTestId("chain-note").innerText().catch(() => "")) || "";
+    const noteBefore =
+      (await dapp
+        .getByTestId("chain-note")
+        .innerText()
+        .catch(() => "")) || "";
     log(`Triggering transaction signature for "${currentBtnText}"...`);
     await submitBtn.click({ noWaitAfter: true });
 
@@ -269,7 +298,9 @@ try {
       if (a === 2 || a === 8 || a === 18) {
         // Probe notification.html to trigger router hash change
         const note = await context.newPage();
-        await note.goto(`chrome-extension://${EXT}/notification.html`, { waitUntil: "domcontentloaded" }).catch(() => {});
+        await note
+          .goto(`chrome-extension://${EXT}/notification.html`, { waitUntil: "domcontentloaded" })
+          .catch(() => {});
         await note.waitForTimeout(600);
       }
       await dapp.waitForTimeout(500);
@@ -281,7 +312,12 @@ try {
     await dapp.waitForFunction(
       (prev) => {
         const note = document.querySelector("[data-testid='chain-note']")?.textContent || "";
-        return note && note !== prev && !note.startsWith("Preparing") && !note.startsWith("Wallet prompt");
+        return (
+          note &&
+          note !== prev &&
+          !note.startsWith("Preparing") &&
+          !note.startsWith("Wallet prompt")
+        );
       },
       noteBefore,
       { timeout: 900000 },
@@ -290,7 +326,11 @@ try {
     const noteAfter = await dapp.getByTestId("chain-note").innerText();
     log(`Step ${stepIndex} settled: ${noteAfter}`);
 
-    const caseIdText = (await dapp.getByTestId("chain-case-id").innerText().catch(() => "")) || "";
+    const caseIdText =
+      (await dapp
+        .getByTestId("chain-case-id")
+        .innerText()
+        .catch(() => "")) || "";
     const match = caseIdText.match(/et-[a-f0-9]{12}/);
     if (match) authoritativeCaseId = match[0];
     log(`Current authoritative case ID: ${authoritativeCaseId}`);
@@ -318,13 +358,16 @@ try {
   // Test 1: Empty storage owner continuation
   log("[VERIFY 1] Testing clean owner session with empty localStorage...");
   const cleanOwner = await context.newPage();
-  await cleanOwner.goto(`${STAGING_URL}/cases/${authoritativeCaseId}`, { waitUntil: "domcontentloaded" });
+  await cleanOwner.goto(`${STAGING_URL}/cases/${authoritativeCaseId}`, {
+    waitUntil: "domcontentloaded",
+  });
   await cleanOwner.evaluate(() => localStorage.clear());
   await cleanOwner.reload({ waitUntil: "domcontentloaded" });
   await cleanOwner.waitForTimeout(3000);
   const cleanOwnerText = await cleanOwner.locator("body").innerText();
   evidence.ownerContinuationFromEmptyStorage =
-    cleanOwnerText.includes(authoritativeCaseId) && !cleanOwnerText.includes("Case not on this device");
+    cleanOwnerText.includes(authoritativeCaseId) &&
+    !cleanOwnerText.includes("Case not on this device");
   log(`Owner continuation from empty storage: ${evidence.ownerContinuationFromEmptyStorage}`);
   await cleanOwner.close();
 
@@ -336,10 +379,14 @@ try {
     args: ["--no-sandbox", "--disable-dev-shm-usage"],
   });
   const strangerPage = await strangerContext.newPage();
-  await strangerPage.goto(`${STAGING_URL}/cases/${authoritativeCaseId}`, { waitUntil: "domcontentloaded" });
+  await strangerPage.goto(`${STAGING_URL}/cases/${authoritativeCaseId}`, {
+    waitUntil: "domcontentloaded",
+  });
   await strangerPage.waitForTimeout(3000);
   const strangerBody = await strangerPage.locator("body").innerText();
-  evidence.nonOwnerReadOnly = strangerBody.includes("Read-only: This case is owned on Studionet by");
+  evidence.nonOwnerReadOnly = strangerBody.includes(
+    "Read-only: This case is owned on Studionet by",
+  );
   log(`Non-owner read-only banner verified: ${evidence.nonOwnerReadOnly}`);
   await strangerContext.close();
 
@@ -349,10 +396,13 @@ try {
   for (const m of ["get_case", "get_relationships", "get_report"]) {
     await dapp.getByTestId("read-method").selectOption(m);
     await dapp.getByTestId("chain-read").click();
-    await dapp.waitForFunction(() => {
-      const txt = document.querySelector("[data-testid='read-out']")?.textContent || "";
-      return txt.includes("\"readAt\"");
-    }, { timeout: 60000 });
+    await dapp.waitForFunction(
+      () => {
+        const txt = document.querySelector("[data-testid='read-out']")?.textContent || "";
+        return txt.includes('"readAt"');
+      },
+      { timeout: 60000 },
+    );
     evidence.reads[m] = await dapp.getByTestId("read-out").innerText();
     log(`Public read ${m} complete.`);
   }
@@ -367,87 +417,42 @@ try {
       await sourceInput.fill(s);
     }
     await dapp.getByTestId("chain-read").click();
-    await dapp.waitForFunction(() => {
-      const txt = document.querySelector("[data-testid='read-out']")?.textContent || "";
-      return txt.includes("\"readAt\"");
-    }, { timeout: 60000 });
+    await dapp.waitForFunction(
+      () => {
+        const txt = document.querySelector("[data-testid='read-out']")?.textContent || "";
+        return txt.includes('"readAt"');
+      },
+      { timeout: 60000 },
+    );
     evidence.reads[`get_source_review:${s}`] = await dapp.getByTestId("read-out").innerText();
     log(`Source review read ${s} complete.`);
   }
 
   // Exact metadata extraction from authoritative read-backs
-  const { execSync } = await import("node:child_process");
-  const gitTagObject = execSync("git rev-parse refs/tags/v1.0.0", { encoding: "utf8" }).trim();
-  const gitPeeledCommit = execSync("git rev-parse 'refs/tags/v1.0.0^{commit}'", { encoding: "utf8" }).trim();
+  const { buildEvidenceMetadata, generateDurableEvidence, getGitTagIdentity } =
+    await import("./generate-acceptance-evidence.mjs");
 
   const caseObj = JSON.parse(JSON.parse(evidence.reads["get_case"]).value);
-  const crypto = await import("node:crypto");
-  const canonicalBytes = Buffer.from(
-    JSON.stringify(
-      {
-        claim: caseObj.manifest.claim,
-        clientRequestId: caseObj.manifest.clientRequestId,
-        language: "en",
-        parentCaseId: caseObj.manifest.parentCaseId,
-        policyVersion: caseObj.manifest.policyVersion,
-        sources: caseObj.manifest.sources,
-      },
-      Object.keys({
-        claim: null,
-        clientRequestId: null,
-        language: null,
-        parentCaseId: null,
-        policyVersion: null,
-        sources: null,
-      }).sort(),
-    ),
-    "utf8",
-  );
-  const recomputedDigest = crypto.createHash("sha256").update(canonicalBytes).digest("hex");
-
   const rev1 = JSON.parse(JSON.parse(evidence.reads["get_source_review:src-1"]).value);
   const rev2 = JSON.parse(JSON.parse(evidence.reads["get_source_review:src-2"]).value);
-  const _rev3 = JSON.parse(JSON.parse(evidence.reads["get_source_review:src-3"]).value);
+  const rev3 = JSON.parse(JSON.parse(evidence.reads["get_source_review:src-3"]).value);
 
-  const q1 = rev1.contributions[0]?.quote || "";
-  const q2 = rev2.contributions[0]?.quote || "";
-
-  // Strictly compute lengths from actual strings
-  const len1 = q1.length;
-  const len2 = q2.length;
-
-  evidence.metadata = {
-    clientRequestId: caseObj.manifest.clientRequestId,
-    canonicalManifestDigest: recomputedDigest,
-    v1TagObjectSha: gitTagObject,
-    v1PeeledCommitSha: gitPeeledCommit,
-    sources: {
-      "src-1": {
-        quote: q1,
-        quoteLength: len1,
-        quoteOffset: rev1.contributions[0]?.quoteOffset ?? -1,
-        offsetVerificationScope: "reported by the accepted execution output; original-text offset not independently rechecked.",
-      },
-      "src-2": {
-        quote: q2,
-        quoteLength: len2,
-        quoteOffset: rev2.contributions[0]?.quoteOffset ?? -1,
-        offsetVerificationScope: "reported by the accepted execution output; original-text offset not independently rechecked.",
-      },
-      "src-3": {
-        quote: "",
-        quoteLength: 0,
-        quoteOffset: -1,
-        offsetVerificationScope: "not applicable; stance is unrelated with empty contributions",
-      },
+  const gitRefs = getGitTagIdentity();
+  const metadata = buildEvidenceMetadata(
+    caseObj.manifest,
+    {
+      "src-1": rev1,
+      "src-2": rev2,
+      "src-3": rev3,
     },
-  };
+    gitRefs,
+  );
 
-  // Assertions against regressions
-  if (len1 !== 137) throw new Error(`Assertion failed: src-1 quote length must be 137, got ${len1}`);
-  if (len2 !== 186) throw new Error(`Assertion failed: src-2 quote length must be 186, got ${len2}`);
-  if (gitTagObject !== "728fd688b67d2300d8340d4c2aaaaffc5e6f83f8") throw new Error(`Assertion failed: unexpected v1.0.0 tag object ${gitTagObject}`);
-  if (gitPeeledCommit !== "cb8abef0a36d55a557ed5e938475ffa3d725f84a") throw new Error(`Assertion failed: unexpected v1.0.0 peeled commit ${gitPeeledCommit}`);
+  evidence.clientRequestId = metadata.clientRequestId;
+  evidence.manifestDigest = metadata.canonicalManifestDigest;
+  evidence.v1TagObjectSha = metadata.v1TagObjectSha;
+  evidence.v1PeeledCommitSha = metadata.v1PeeledCommitSha;
+  evidence.metadata = metadata;
 
   // Test 4: JSON export
   log("[VERIFY 4] Verifying JSON export button...");
@@ -455,8 +460,10 @@ try {
   evidence.hasJsonExport = await exportBtn.isVisible().catch(() => false);
   log(`JSON Export button visible: ${evidence.hasJsonExport}`);
 
-  fs.writeFileSync("/tmp/metamask-acceptance-evidence.json", JSON.stringify(evidence, null, 2));
-  log("\nAcceptance journey succeeded! Evidence written to /tmp/metamask-acceptance-evidence.json");
+  generateDurableEvidence(evidence);
+  log(
+    "\nAcceptance journey succeeded! Evidence written to /tmp/metamask-acceptance-evidence.json and EchoTrace/docs/acceptance-evidence-c3a2.json",
+  );
 } catch (err) {
   log(`METAMASK ACCEPTANCE FAILED: ${err.message}`);
   process.exitCode = 1;

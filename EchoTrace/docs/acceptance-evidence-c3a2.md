@@ -28,21 +28,21 @@ Authoritative reference for candidate `0x3Af6aD96e89A8B120A329cc472b2B52D1E55E31
 
 ### Sequential 5-Step Consensus Execution Ledger
 
-| Step | Method | Transaction Hash | Status | Execution Result |
-| --- | --- | --- | --- | --- |
-| 1 | `create_case` | `0x6fd794326e69ef0602490f4ad0ecfe701add4ec0c218146bd9bd00fbc529aa33` | FINALIZED | SUCCESS |
-| 2 | `review_sources_batch` | `0xe3b751b63f3250e812b208e971633bb6ecaa368eb2b05532163c886418730d74` | FINALIZED | SUCCESS |
-| 3 | `seal_source_reviews` | `0x4e5883aa3a85b43520c8cb57b996603983064b256b5f70f952a56942cb1e442c` | FINALIZED | SUCCESS |
-| 4 | `review_relationship_batch` | `0x8f2a08d91fe890510ca5e41e9a7349bd0488eb600ca3ab7f16b6a6f54e46ddcf` | FINALIZED | SUCCESS |
-| 5 | `finalize_case` | `0xa0b09b85c1f0477b0342b327c1efab2ca4f2374db6b3f6b841ec0ce24e95935d` | FINALIZED | SUCCESS |
+| Step | Method                      | Transaction Hash                                                     | Status    | Execution Result |
+| ---- | --------------------------- | -------------------------------------------------------------------- | --------- | ---------------- |
+| 1    | `create_case`               | `0x6fd794326e69ef0602490f4ad0ecfe701add4ec0c218146bd9bd00fbc529aa33` | FINALIZED | SUCCESS          |
+| 2    | `review_sources_batch`      | `0xe3b751b63f3250e812b208e971633bb6ecaa368eb2b05532163c886418730d74` | FINALIZED | SUCCESS          |
+| 3    | `seal_source_reviews`       | `0x4e5883aa3a85b43520c8cb57b996603983064b256b5f70f952a56942cb1e442c` | FINALIZED | SUCCESS          |
+| 4    | `review_relationship_batch` | `0x8f2a08d91fe890510ca5e41e9a7349bd0488eb600ca3ab7f16b6a6f54e46ddcf` | FINALIZED | SUCCESS          |
+| 5    | `finalize_case`             | `0xa0b09b85c1f0477b0342b327c1efab2ca4f2374db6b3f6b841ec0ce24e95935d` | FINALIZED | SUCCESS          |
 
 ## 4. Stored Semantic Outcomes & Quote Verification
 
-| Source ID | URL | Stance | Exact Stored Quote | Length | Stored Offset | Offset Verification Scope |
-| --- | --- | --- | --- | --- | --- | --- |
-| `src-1` | `https://www.iana.org/domains/reserved` | `primary_reporting` | `"As described in RFC 2606 and RFC 6761, a number of domains such as example.com and example.org are maintained for documentation purposes."` | 137 | 188 | Reported by the accepted execution output; original-text offset not independently rechecked. |
-| `src-2` | `https://en.wikipedia.org/wiki/Example.com` | `attributed_source` | `"They are reserved by the Internet Assigned Numbers Authority (IANA) at the direction of the Internet Engineering Task Force (IETF) as special-use domain names for documentation purposes."` | 186 | 872 | Reported by the accepted execution output; original-text offset not independently rechecked. |
-| `src-3` | `https://httpbin.org/html` | `unrelated` | `""` | 0 | -1 | Not applicable; stance is unrelated with empty contributions. |
+| Source ID | URL                                         | Stance              | Exact Stored Quote                                                                                                                                                                             | Length | Stored Offset | Offset Verification Scope                                                                    |
+| --------- | ------------------------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ------------- | -------------------------------------------------------------------------------------------- |
+| `src-1`   | `https://www.iana.org/domains/reserved`     | `primary_reporting` | `"As described in RFC 2606 and RFC 6761, a number of domains such as example.com and example.org are maintained for documentation purposes."`                                                  | 137    | 188           | Reported by the accepted execution output; original-text offset not independently rechecked. |
+| `src-2`   | `https://en.wikipedia.org/wiki/Example.com` | `attributed_source` | `"They are reserved by the Internet Assigned Numbers Authority (IANA) at the direction of the Internet Engineering Task Force (IETF) as special-use domain names for documentation purposes."` | 186    | 872           | Reported by the accepted execution output; original-text offset not independently rechecked. |
+| `src-3`   | `https://httpbin.org/html`                  | `unrelated`         | `""`                                                                                                                                                                                           | 0      | -1            | Not applicable; stance is unrelated with empty contributions.                                |
 
 ### Relationships
 
